@@ -14,16 +14,23 @@ defmodule Alumiini.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      # ETS cache for commits, resources, sync state
-      Alumiini.Cache,
-      # Registry for worker name lookup
-      {Registry, keys: :unique, name: Alumiini.Registry},
-      # Git Port GenServer (communicates with Rust binary)
-      Alumiini.Git,
-      # DynamicSupervisor for Worker processes
-      Alumiini.Supervisor
-    ]
+    # Git Port GenServer (communicates with Rust binary)
+    children =
+      [
+        # ETS cache for commits, resources, sync state
+        Alumiini.Cache,
+        # Registry for worker name lookup
+        {Registry, keys: :unique, name: Alumiini.Registry}
+      ] ++
+        if Application.get_env(:alumiini, :enable_git, true) do
+          [Alumiini.Git]
+        else
+          []
+        end ++
+        [
+          # DynamicSupervisor for Worker processes
+          Alumiini.Supervisor
+        ]
 
     # Add Controller if enabled (watches GitRepository CRDs)
     children =

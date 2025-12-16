@@ -3,7 +3,8 @@ defmodule Alumiini.WorkerTest do
 
   alias Alumiini.Worker
 
-  # Application is started by test_helper.exs
+  # These tests require Git GenServer (Rust binary)
+  @moduletag :integration
 
   describe "start_link/1" do
     test "starts a worker with config" do
