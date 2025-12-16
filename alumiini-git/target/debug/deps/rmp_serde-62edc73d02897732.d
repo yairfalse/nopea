@@ -1,0 +1,12 @@
+/Users/yair/projects/alumiini/alumiini-git/target/debug/deps/rmp_serde-62edc73d02897732.d: /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/lib.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/bytes.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/config.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/decode.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/encode.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/../README.md
+
+/Users/yair/projects/alumiini/alumiini-git/target/debug/deps/librmp_serde-62edc73d02897732.rlib: /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/lib.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/bytes.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/config.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/decode.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/encode.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/../README.md
+
+/Users/yair/projects/alumiini/alumiini-git/target/debug/deps/librmp_serde-62edc73d02897732.rmeta: /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/lib.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/bytes.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/config.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/decode.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/encode.rs /Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/../README.md
+
+/Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/lib.rs:
+/Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/bytes.rs:
+/Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/config.rs:
+/Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/decode.rs:
+/Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/encode.rs:
+/Users/yair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmp-serde-1.3.0/src/../README.md:

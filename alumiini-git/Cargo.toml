@@ -1,0 +1,21 @@
+[package]
+name = "alumiini-git"
+version = "0.1.0"
+edition = "2021"
+description = "Git operations sidecar for ALUMIINI"
+license = "Apache-2.0"
+
+[dependencies]
+git2 = "0.19"
+serde = { version = "1", features = ["derive"] }
+rmp-serde = "1"
+base64 = "0.22"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1

@@ -34,6 +34,9 @@ defmodule Alumiini.MixProject do
       # JSON
       {:jason, "~> 1.4"},
 
+      # Msgpack (for Rust Port protocol)
+      {:msgpax, "~> 2.4"},
+
       # Web server (for webhooks)
       {:plug_cowboy, "~> 2.7"},
 
