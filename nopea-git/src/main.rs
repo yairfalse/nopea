@@ -25,9 +25,8 @@ fn main() {
                     break;
                 }
             }
-            Err(e) => {
+            Err(_) => {
                 // EOF or read error - exit cleanly
-                eprintln!("Read error (shutting down): {}", e);
                 break;
             }
         }

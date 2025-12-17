@@ -3,6 +3,15 @@ defmodule Nopea.GitTest do
 
   alias Nopea.Git
 
+  setup do
+    # Start Git GenServer for integration tests if binary exists
+    if rust_binary_exists?() do
+      start_supervised!(Nopea.Git)
+    end
+
+    :ok
+  end
+
   describe "decode_content/1" do
     test "decodes valid base64 content" do
       content = "hello world"
