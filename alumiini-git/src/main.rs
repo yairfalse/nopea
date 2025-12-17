@@ -1,4 +1,4 @@
-//! alumiini-git: Git operations sidecar for ALUMIINI
+//! alumiini-git: Git operations port for ALUMIINI
 //!
 //! Communicates via length-prefixed msgpack over stdin/stdout.
 //! Protocol: 4-byte big-endian length + msgpack payload
