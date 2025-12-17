@@ -422,6 +422,36 @@ feat: add Worker GenServer for repo sync
 
 ---
 
+## GIT WORKFLOW
+
+**ALWAYS use feature branches and PRs. Never commit directly to main.**
+
+### Branch Naming
+```bash
+# Format: type/short-description
+feat/add-webhook-endpoint
+fix/worker-retry-logic
+chore/update-deps
+```
+
+### Workflow
+1. Create feature branch from main
+2. Make changes with incremental commits
+3. Push branch to origin
+4. Create PR via `gh pr create`
+5. Merge after review
+
+### Example
+```bash
+git checkout -b feat/add-sync-status
+# ... make changes ...
+git add . && git commit -m "feat: add sync status tracking"
+git push -u origin feat/add-sync-status
+gh pr create --title "Add sync status tracking" --body "..."
+```
+
+---
+
 ## NO STUBS, NO TODOs
 
 ```elixir
