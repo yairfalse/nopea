@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize, ser::SerializeMap};
 
+use crate::git::CommitInfo;
+
 /// Request from Elixir to Rust
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", rename_all = "lowercase")]
@@ -24,6 +26,9 @@ pub enum Request {
 
     /// Read a file (returns base64)
     Read { path: String, file: String },
+
+    /// Get HEAD commit info
+    Head { path: String },
 }
 
 fn default_depth() -> u32 {
@@ -39,6 +44,9 @@ pub enum Response {
     /// Success with file list
     OkFiles(Vec<String>),
 
+    /// Success with commit info
+    OkCommitInfo(CommitInfo),
+
     /// Error
     Err(String),
 }
@@ -53,6 +61,7 @@ impl Serialize for Response {
         match self {
             Response::Ok(s) => map.serialize_entry("ok", s)?,
             Response::OkFiles(files) => map.serialize_entry("ok", files)?,
+            Response::OkCommitInfo(info) => map.serialize_entry("ok", info)?,
             Response::Err(e) => map.serialize_entry("err", e)?,
         }
         map.end()

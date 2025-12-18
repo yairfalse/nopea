@@ -127,6 +127,45 @@ defmodule Nopea.GitTest do
     end
   end
 
+  describe "head/1 integration" do
+    @tag :integration
+    test "returns commit info from git repository" do
+      unless rust_binary_exists?() do
+        IO.puts("Skipping: Rust binary not built")
+        :ok
+      else
+        path = "/tmp/nopea-test-head-#{:rand.uniform(100_000)}"
+
+        try do
+          # Initialize git repo
+          File.mkdir_p!(path)
+          System.cmd("git", ["init"], cd: path)
+          System.cmd("git", ["config", "user.name", "Test User"], cd: path)
+          System.cmd("git", ["config", "user.email", "test@example.com"], cd: path)
+
+          # Create a commit
+          File.write!(Path.join(path, "test.txt"), "hello")
+          System.cmd("git", ["add", "."], cd: path)
+          System.cmd("git", ["commit", "-m", "Initial commit"], cd: path)
+
+          # Test head
+          result = Git.head(path)
+
+          assert {:ok, info} = result
+          assert is_binary(info.sha)
+          assert String.length(info.sha) == 40
+          assert info.author == "Test User"
+          assert info.email == "test@example.com"
+          assert info.message =~ "Initial commit"
+          assert is_integer(info.timestamp)
+          assert info.timestamp > 0
+        after
+          File.rm_rf!(path)
+        end
+      end
+    end
+  end
+
   defp rust_binary_exists? do
     dev_path = Path.join([File.cwd!(), "nopea-git", "target", "release", "nopea-git"])
     File.exists?(dev_path)

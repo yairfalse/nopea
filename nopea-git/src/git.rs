@@ -26,6 +26,32 @@ pub enum GitError {
     FileNotFound(String),
 }
 
+/// Commit information returned by head()
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CommitInfo {
+    pub sha: String,
+    pub author: String,
+    pub email: String,
+    pub message: String,
+    pub timestamp: i64,
+}
+
+/// Get HEAD commit information
+pub fn head(path: &str) -> Result<CommitInfo, GitError> {
+    let repo = Repository::open(path)?;
+    let head = repo.head()?;
+    let commit = head.peel_to_commit()?;
+    let author = commit.author();
+
+    Ok(CommitInfo {
+        sha: commit.id().to_string(),
+        author: author.name().unwrap_or("").to_string(),
+        email: author.email().unwrap_or("").to_string(),
+        message: commit.message().unwrap_or("").to_string(),
+        timestamp: commit.time().seconds(),
+    })
+}
+
 /// Sync a repository: clone if not exists, fetch+reset if exists.
 /// Returns the HEAD commit SHA.
 pub fn sync(url: &str, branch: &str, path: &str, depth: u32) -> Result<String, GitError> {
@@ -211,5 +237,49 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let result = read_file(temp.path().to_str().unwrap(), "nonexistent.yaml");
         assert!(matches!(result, Err(GitError::FileNotFound(_))));
+    }
+
+    #[test]
+    fn test_head_returns_commit_info() {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path();
+
+        // Initialize a git repo with a commit
+        let repo = Repository::init(dir).unwrap();
+
+        // Configure user for commit
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+
+        // Create a file and commit it
+        let file_path = dir.join("test.txt");
+        fs::write(&file_path, "hello").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "Initial commit\n\nThis is the body.",
+            &tree,
+            &[],
+        ).unwrap();
+
+        // Now test head()
+        let info = head(dir.to_str().unwrap()).unwrap();
+
+        assert_eq!(info.author, "Test User");
+        assert_eq!(info.email, "test@example.com");
+        assert_eq!(info.message, "Initial commit\n\nThis is the body.");
+        assert!(!info.sha.is_empty());
+        assert!(info.timestamp > 0);
     }
 }

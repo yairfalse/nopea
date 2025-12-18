@@ -50,6 +50,24 @@ defmodule Nopea.Git do
     GenServer.call(__MODULE__, {:read, path, file}, @timeout)
   end
 
+  @typedoc "Commit information from HEAD"
+  @type commit_info :: %{
+          sha: String.t(),
+          author: String.t(),
+          email: String.t(),
+          message: String.t(),
+          timestamp: integer()
+        }
+
+  @doc """
+  Get HEAD commit information.
+  Returns {:ok, commit_info} or {:error, reason}.
+  """
+  @spec head(String.t()) :: {:ok, commit_info()} | {:error, String.t()}
+  def head(path) do
+    GenServer.call(__MODULE__, {:head, path}, @timeout)
+  end
+
   # Server Callbacks
 
   @impl true
@@ -92,6 +110,16 @@ defmodule Nopea.Git do
   @impl true
   def handle_call({:read, path, file}, from, state) do
     request = %{"op" => "read", "path" => path, "file" => file}
+
+    case send_request(state.port, request) do
+      :ok -> {:noreply, %{state | caller: from}}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:head, path}, from, state) do
+    request = %{"op" => "head", "path" => path}
 
     case send_request(state.port, request) do
       :ok -> {:noreply, %{state | caller: from}}
@@ -183,6 +211,13 @@ defmodule Nopea.Git do
       {:ok, %{"ok" => files}} when is_list(files) ->
         {:ok, files}
 
+      {:ok,
+       %{
+         "ok" =>
+           %{"sha" => _, "author" => _, "email" => _, "message" => _, "timestamp" => _} = info
+       }} ->
+        {:ok, atomize_keys(info)}
+
       {:ok, %{"err" => reason}} ->
         {:error, reason}
 
@@ -194,6 +229,10 @@ defmodule Nopea.Git do
         Logger.error("Failed to unpack msgpack response: #{inspect(reason)}")
         {:error, {:msgpack_error, reason}}
     end
+  end
+
+  defp atomize_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {String.to_existing_atom(k), v} end)
   end
 
   @doc """
