@@ -217,6 +217,29 @@ defmodule Nopea.GitTest do
     end
   end
 
+  describe "ls_remote/2 integration" do
+    @tag :integration
+    @tag timeout: 30_000
+    test "returns latest commit SHA from remote" do
+      unless rust_binary_exists?() do
+        IO.puts("Skipping: Rust binary not built")
+        :ok
+      else
+        result =
+          Git.ls_remote(
+            "https://github.com/octocat/Hello-World.git",
+            "master"
+          )
+
+        assert {:ok, sha} = result
+        assert is_binary(sha)
+        # SHA-1 is 40 hex chars
+        assert String.length(sha) == 40
+        assert String.match?(sha, ~r/^[0-9a-f]+$/)
+      end
+    end
+  end
+
   defp rust_binary_exists? do
     dev_path = Path.join([File.cwd!(), "nopea-git", "target", "release", "nopea-git"])
     File.exists?(dev_path)

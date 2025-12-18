@@ -32,6 +32,9 @@ pub enum Request {
 
     /// Checkout (hard reset) to a specific commit SHA
     Checkout { path: String, sha: String },
+
+    /// Query remote for branch SHA without fetching
+    LsRemote { url: String, branch: String },
 }
 
 fn default_depth() -> u32 {

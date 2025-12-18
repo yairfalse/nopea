@@ -78,6 +78,16 @@ defmodule Nopea.Git do
     GenServer.call(__MODULE__, {:checkout, path, sha}, @timeout)
   end
 
+  @doc """
+  Query remote for the latest commit SHA of a branch without fetching.
+  Useful for cheap polling to detect new commits.
+  Returns {:ok, sha} or {:error, reason}.
+  """
+  @spec ls_remote(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def ls_remote(url, branch) do
+    GenServer.call(__MODULE__, {:ls_remote, url, branch}, @timeout)
+  end
+
   # Server Callbacks
 
   @impl true
@@ -140,6 +150,16 @@ defmodule Nopea.Git do
   @impl true
   def handle_call({:checkout, path, sha}, from, state) do
     request = %{"op" => "checkout", "path" => path, "sha" => sha}
+
+    case send_request(state.port, request) do
+      :ok -> {:noreply, %{state | caller: from}}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:ls_remote, url, branch}, from, state) do
+    request = %{"op" => "lsremote", "url" => url, "branch" => branch}
 
     case send_request(state.port, request) do
       :ok -> {:noreply, %{state | caller: from}}

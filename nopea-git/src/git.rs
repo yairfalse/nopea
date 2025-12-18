@@ -64,6 +64,34 @@ pub fn checkout(path: &str, sha: &str) -> Result<String, GitError> {
     Ok(sha.to_string())
 }
 
+/// Query remote for the latest commit SHA of a branch (without fetching)
+pub fn ls_remote(url: &str, branch: &str) -> Result<String, GitError> {
+    let mut remote = git2::Remote::create_detached(url)?;
+
+    let mut callbacks = RemoteCallbacks::new();
+    callbacks.credentials(|_url, username_from_url, _allowed_types| {
+        if let Some(username) = username_from_url {
+            Cred::ssh_key_from_agent(username)
+        } else {
+            Cred::default()
+        }
+    });
+
+    // Connect and list refs
+    remote.connect_auth(git2::Direction::Fetch, Some(callbacks), None)?;
+    let refs = remote.list()?;
+
+    // Find the branch ref
+    let branch_ref = format!("refs/heads/{}", branch);
+    for r in refs {
+        if r.name() == branch_ref {
+            return Ok(r.oid().to_string());
+        }
+    }
+
+    Err(GitError::BranchNotFound(branch.to_string()))
+}
+
 /// Sync a repository: clone if not exists, fetch+reset if exists.
 /// Returns the HEAD commit SHA.
 pub fn sync(url: &str, branch: &str, path: &str, depth: u32) -> Result<String, GitError> {
@@ -360,5 +388,20 @@ mod tests {
         // Verify file content is rolled back
         let content = fs::read_to_string(dir.join("file.txt")).unwrap();
         assert_eq!(content, "version 1");
+    }
+
+    #[test]
+    fn test_ls_remote_returns_sha() {
+        // Test against a known public repo
+        let result = ls_remote(
+            "https://github.com/octocat/Hello-World.git",
+            "master",
+        );
+
+        assert!(result.is_ok());
+        let sha = result.unwrap();
+        // SHA-1 is 40 hex chars
+        assert_eq!(sha.len(), 40);
+        assert!(sha.chars().all(|c: char| c.is_ascii_hexdigit()));
     }
 }

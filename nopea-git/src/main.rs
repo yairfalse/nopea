@@ -95,5 +95,10 @@ fn handle_request(request: Request) -> Response {
             Ok(sha) => Response::Ok(sha),
             Err(e) => Response::Err(e.to_string()),
         },
+
+        Request::LsRemote { url, branch } => match git::ls_remote(&url, &branch) {
+            Ok(sha) => Response::Ok(sha),
+            Err(e) => Response::Err(e.to_string()),
+        },
     }
 }
