@@ -127,6 +127,159 @@ defmodule Nopea.GitTest do
     end
   end
 
+  describe "head/1 integration" do
+    @tag :integration
+    test "returns commit info from git repository" do
+      unless rust_binary_exists?() do
+        IO.puts("Skipping: Rust binary not built")
+        :ok
+      else
+        path = "/tmp/nopea-test-head-#{:rand.uniform(100_000)}"
+
+        try do
+          # Initialize git repo
+          File.mkdir_p!(path)
+          System.cmd("git", ["init"], cd: path)
+          System.cmd("git", ["config", "user.name", "Test User"], cd: path)
+          System.cmd("git", ["config", "user.email", "test@example.com"], cd: path)
+
+          # Create a commit
+          File.write!(Path.join(path, "test.txt"), "hello")
+          System.cmd("git", ["add", "."], cd: path)
+          System.cmd("git", ["commit", "-m", "Initial commit"], cd: path)
+
+          # Test head
+          result = Git.head(path)
+
+          assert {:ok, info} = result
+          assert is_binary(info.sha)
+          assert String.length(info.sha) == 40
+          assert info.author == "Test User"
+          assert info.email == "test@example.com"
+          assert info.message =~ "Initial commit"
+          assert is_integer(info.timestamp)
+          assert info.timestamp > 0
+        after
+          File.rm_rf!(path)
+        end
+      end
+    end
+
+    @tag :integration
+    test "returns error for non-existent path" do
+      unless rust_binary_exists?() do
+        IO.puts("Skipping: Rust binary not built")
+        :ok
+      else
+        path = "/tmp/nopea-nonexistent-#{:rand.uniform(100_000)}"
+
+        result = Git.head(path)
+
+        assert {:error, reason} = result
+        assert is_binary(reason)
+        assert reason =~ "failed to open" or reason =~ "not found" or reason =~ "No such file"
+      end
+    end
+
+    @tag :integration
+    test "returns error for directory that is not a git repository" do
+      unless rust_binary_exists?() do
+        IO.puts("Skipping: Rust binary not built")
+        :ok
+      else
+        path = "/tmp/nopea-not-git-#{:rand.uniform(100_000)}"
+
+        try do
+          # Create a regular directory (not a git repo)
+          File.mkdir_p!(path)
+          File.write!(Path.join(path, "some-file.txt"), "not a repo")
+
+          result = Git.head(path)
+
+          assert {:error, reason} = result
+          assert is_binary(reason)
+          assert reason =~ "repository" or reason =~ "git"
+        after
+          File.rm_rf!(path)
+        end
+      end
+    end
+  end
+
+  describe "checkout/2 integration" do
+    @tag :integration
+    test "rolls back to a previous commit" do
+      unless rust_binary_exists?() do
+        IO.puts("Skipping: Rust binary not built")
+        :ok
+      else
+        path = "/tmp/nopea-test-checkout-#{:rand.uniform(100_000)}"
+
+        try do
+          # Initialize git repo
+          File.mkdir_p!(path)
+          System.cmd("git", ["init"], cd: path)
+          System.cmd("git", ["config", "user.name", "Test User"], cd: path)
+          System.cmd("git", ["config", "user.email", "test@example.com"], cd: path)
+
+          # First commit
+          File.write!(Path.join(path, "file.txt"), "version 1")
+          System.cmd("git", ["add", "."], cd: path)
+          System.cmd("git", ["commit", "-m", "First commit"], cd: path)
+
+          # Get first commit SHA
+          {:ok, first_info} = Git.head(path)
+          first_sha = first_info.sha
+
+          # Second commit
+          File.write!(Path.join(path, "file.txt"), "version 2")
+          System.cmd("git", ["add", "."], cd: path)
+          System.cmd("git", ["commit", "-m", "Second commit"], cd: path)
+
+          # Verify we're at second commit
+          {:ok, current} = Git.head(path)
+          assert current.message =~ "Second commit"
+
+          # Checkout first commit (rollback)
+          assert {:ok, ^first_sha} = Git.checkout(path, first_sha)
+
+          # Verify we're back at first commit
+          {:ok, after_checkout} = Git.head(path)
+          assert after_checkout.sha == first_sha
+          assert after_checkout.message =~ "First commit"
+
+          # Verify file content is rolled back
+          assert File.read!(Path.join(path, "file.txt")) == "version 1"
+        after
+          File.rm_rf!(path)
+        end
+      end
+    end
+  end
+
+  describe "ls_remote/2 integration" do
+    @tag :integration
+    @tag timeout: 30_000
+    test "returns latest commit SHA from remote" do
+      unless rust_binary_exists?() do
+        IO.puts("Skipping: Rust binary not built")
+        :ok
+      else
+        result =
+          Git.ls_remote(
+            "https://github.com/octocat/Hello-World.git",
+            "master"
+          )
+
+        assert {:ok, sha} = result
+        assert is_binary(sha)
+        # SHA-1 is 40 hex chars
+        assert String.length(sha) == 40
+        assert String.match?(sha, ~r/^[0-9a-f]+$/)
+      end
+    end
+  end
+
   defp rust_binary_exists? do
     dev_path = Path.join([File.cwd!(), "nopea-git", "target", "release", "nopea-git"])
     File.exists?(dev_path)

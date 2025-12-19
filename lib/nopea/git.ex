@@ -50,6 +50,49 @@ defmodule Nopea.Git do
     GenServer.call(__MODULE__, {:read, path, file}, @timeout)
   end
 
+  @typedoc "Commit information from HEAD"
+  @type commit_info :: %{
+          sha: String.t(),
+          author: String.t(),
+          email: String.t(),
+          message: String.t(),
+          timestamp: integer()
+        }
+
+  @doc """
+  Get HEAD commit information.
+  Returns {:ok, commit_info} or {:error, reason}.
+  """
+  @spec head(String.t()) :: {:ok, commit_info()} | {:error, String.t()}
+  def head(path) do
+    GenServer.call(__MODULE__, {:head, path}, @timeout)
+  end
+
+  @doc """
+  Checkout (hard reset) to a specific commit SHA.
+
+  **Warning:** This performs a destructive hard reset and will discard all
+  uncommitted changes in the working directory. Ensure there is no important
+  uncommitted work before calling this function.
+
+  Used for rollback to a known good commit.
+  Returns {:ok, sha} or {:error, reason}.
+  """
+  @spec checkout(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def checkout(path, sha) do
+    GenServer.call(__MODULE__, {:checkout, path, sha}, @timeout)
+  end
+
+  @doc """
+  Query remote for the latest commit SHA of a branch without fetching.
+  Useful for cheap polling to detect new commits.
+  Returns {:ok, sha} or {:error, reason}.
+  """
+  @spec ls_remote(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def ls_remote(url, branch) do
+    GenServer.call(__MODULE__, {:ls_remote, url, branch}, @timeout)
+  end
+
   # Server Callbacks
 
   @impl true
@@ -92,6 +135,36 @@ defmodule Nopea.Git do
   @impl true
   def handle_call({:read, path, file}, from, state) do
     request = %{"op" => "read", "path" => path, "file" => file}
+
+    case send_request(state.port, request) do
+      :ok -> {:noreply, %{state | caller: from}}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:head, path}, from, state) do
+    request = %{"op" => "head", "path" => path}
+
+    case send_request(state.port, request) do
+      :ok -> {:noreply, %{state | caller: from}}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:checkout, path, sha}, from, state) do
+    request = %{"op" => "checkout", "path" => path, "sha" => sha}
+
+    case send_request(state.port, request) do
+      :ok -> {:noreply, %{state | caller: from}}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:ls_remote, url, branch}, from, state) do
+    request = %{"op" => "lsremote", "url" => url, "branch" => branch}
 
     case send_request(state.port, request) do
       :ok -> {:noreply, %{state | caller: from}}
@@ -182,6 +255,27 @@ defmodule Nopea.Git do
 
       {:ok, %{"ok" => files}} when is_list(files) ->
         {:ok, files}
+
+      {:ok,
+       %{
+         "ok" => %{
+           "sha" => sha,
+           "author" => author,
+           "email" => email,
+           "message" => message,
+           "timestamp" => timestamp
+         }
+       }}
+      when is_binary(sha) and is_binary(author) and is_binary(email) and
+             is_binary(message) and is_integer(timestamp) ->
+        {:ok,
+         %{
+           sha: sha,
+           author: author,
+           email: email,
+           message: message,
+           timestamp: timestamp
+         }}
 
       {:ok, %{"err" => reason}} ->
         {:error, reason}

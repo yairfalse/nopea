@@ -44,13 +44,12 @@ fn read_request<R: Read>(reader: &mut R) -> Result<Request, io::Error> {
     reader.read_exact(&mut payload)?;
 
     // Deserialize msgpack
-    rmp_serde::from_slice(&payload)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    rmp_serde::from_slice(&payload).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 fn write_response<W: Write>(writer: &mut W, response: &Response) -> Result<(), io::Error> {
-    // Serialize to msgpack
-    let payload = rmp_serde::to_vec(response)
+    // Serialize to msgpack with named fields (maps instead of arrays)
+    let payload = rmp_serde::to_vec_named(response)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     // Write 4-byte length prefix (big-endian)
@@ -83,6 +82,21 @@ fn handle_request(request: Request) -> Response {
 
         Request::Read { path, file } => match git::read_file(&path, &file) {
             Ok(content) => Response::Ok(content),
+            Err(e) => Response::Err(e.to_string()),
+        },
+
+        Request::Head { path } => match git::head(&path) {
+            Ok(info) => Response::OkCommitInfo(info),
+            Err(e) => Response::Err(e.to_string()),
+        },
+
+        Request::Checkout { path, sha } => match git::checkout(&path, &sha) {
+            Ok(sha) => Response::Ok(sha),
+            Err(e) => Response::Err(e.to_string()),
+        },
+
+        Request::LsRemote { url, branch } => match git::ls_remote(&url, &branch) {
+            Ok(sha) => Response::Ok(sha),
             Err(e) => Response::Err(e.to_string()),
         },
     }

@@ -1,6 +1,8 @@
 //! Protocol definitions for nopea-git
 
-use serde::{Deserialize, Serialize, ser::SerializeMap};
+use serde::{ser::SerializeMap, Deserialize, Serialize};
+
+use crate::git::CommitInfo;
 
 /// Request from Elixir to Rust
 #[derive(Debug, Deserialize)]
@@ -24,6 +26,15 @@ pub enum Request {
 
     /// Read a file (returns base64)
     Read { path: String, file: String },
+
+    /// Get HEAD commit info
+    Head { path: String },
+
+    /// Checkout (hard reset) to a specific commit SHA
+    Checkout { path: String, sha: String },
+
+    /// Query remote for branch SHA without fetching
+    LsRemote { url: String, branch: String },
 }
 
 fn default_depth() -> u32 {
@@ -39,6 +50,9 @@ pub enum Response {
     /// Success with file list
     OkFiles(Vec<String>),
 
+    /// Success with commit info
+    OkCommitInfo(CommitInfo),
+
     /// Error
     Err(String),
 }
@@ -53,6 +67,7 @@ impl Serialize for Response {
         match self {
             Response::Ok(s) => map.serialize_entry("ok", s)?,
             Response::OkFiles(files) => map.serialize_entry("ok", files)?,
+            Response::OkCommitInfo(info) => map.serialize_entry("ok", info)?,
             Response::Err(e) => map.serialize_entry("err", e)?,
         }
         map.end()

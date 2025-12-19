@@ -3,9 +3,7 @@
 use std::path::Path;
 
 use base64::Engine;
-use git2::{
-    build::RepoBuilder, Cred, FetchOptions, RemoteCallbacks, Repository, ResetType,
-};
+use git2::{build::RepoBuilder, Cred, FetchOptions, RemoteCallbacks, Repository, ResetType};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -24,6 +22,85 @@ pub enum GitError {
 
     #[error("file not found: {0}")]
     FileNotFound(String),
+}
+
+/// Commit information returned by head()
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CommitInfo {
+    /// Full SHA-1 hash of the commit (40 hex characters)
+    pub sha: String,
+    /// Name of the commit author
+    pub author: String,
+    /// Email address of the commit author
+    pub email: String,
+    /// Full commit message (subject + body)
+    pub message: String,
+    /// Commit time as Unix timestamp in seconds (UTC)
+    pub timestamp: i64,
+}
+
+/// Get HEAD commit information
+pub fn head(path: &str) -> Result<CommitInfo, GitError> {
+    let repo = Repository::open(path)?;
+    let head = repo.head()?;
+    let commit = head.peel_to_commit()?;
+    let author = commit.author();
+
+    Ok(CommitInfo {
+        sha: commit.id().to_string(),
+        author: author.name().unwrap_or("").to_string(),
+        email: author.email().unwrap_or("").to_string(),
+        message: commit.message().unwrap_or("").to_string(),
+        timestamp: commit.time().seconds(),
+    })
+}
+
+/// Checkout a specific commit by SHA (hard reset).
+///
+/// **Warning:** This performs a destructive hard reset and will discard all
+/// uncommitted changes in the working directory. The repository will be left
+/// in a detached HEAD state pointing to the specified commit.
+pub fn checkout(path: &str, sha: &str) -> Result<String, GitError> {
+    let repo = Repository::open(path)?;
+    let oid = git2::Oid::from_str(sha)?;
+    let commit = repo.find_commit(oid)?;
+
+    // Hard reset to the commit
+    repo.reset(commit.as_object(), ResetType::Hard, None)?;
+
+    Ok(sha.to_string())
+}
+
+/// Query remote for the latest commit SHA of a branch (without fetching)
+pub fn ls_remote(url: &str, branch: &str) -> Result<String, GitError> {
+    let branch_ref = format!("refs/heads/{}", branch);
+
+    // Use a scope to ensure remote is dropped (and disconnected) before returning.
+    // Remote's Drop impl handles cleanup, so we rely on RAII rather than explicit disconnect.
+    let found_sha = {
+        let mut remote = git2::Remote::create_detached(url)?;
+
+        let mut callbacks = RemoteCallbacks::new();
+        callbacks.credentials(|_url, username_from_url, _allowed_types| {
+            if let Some(username) = username_from_url {
+                Cred::ssh_key_from_agent(username)
+            } else {
+                Cred::default()
+            }
+        });
+
+        // Connect and list refs
+        remote.connect_auth(git2::Direction::Fetch, Some(callbacks), None)?;
+        let refs = remote.list()?;
+
+        // Find the branch ref
+        refs.iter()
+            .find(|r| r.name() == branch_ref)
+            .map(|r| r.oid().to_string())
+        // remote is dropped here, triggering automatic disconnect via Drop
+    };
+
+    found_sha.ok_or_else(|| GitError::BranchNotFound(branch.to_string()))
 }
 
 /// Sync a repository: clone if not exists, fetch+reset if exists.
@@ -211,5 +288,125 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let result = read_file(temp.path().to_str().unwrap(), "nonexistent.yaml");
         assert!(matches!(result, Err(GitError::FileNotFound(_))));
+    }
+
+    #[test]
+    fn test_head_returns_commit_info() {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path();
+
+        // Initialize a git repo with a commit
+        let repo = Repository::init(dir).unwrap();
+
+        // Configure user for commit
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+
+        // Create a file and commit it
+        let file_path = dir.join("test.txt");
+        fs::write(&file_path, "hello").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "Initial commit\n\nThis is the body.",
+            &tree,
+            &[],
+        )
+        .unwrap();
+
+        // Now test head()
+        let info = head(dir.to_str().unwrap()).unwrap();
+
+        assert_eq!(info.author, "Test User");
+        assert_eq!(info.email, "test@example.com");
+        assert_eq!(info.message, "Initial commit\n\nThis is the body.");
+        assert!(!info.sha.is_empty());
+        assert!(info.timestamp > 0);
+    }
+
+    #[test]
+    fn test_checkout_resets_to_commit() {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path();
+
+        // Initialize repo
+        let repo = Repository::init(dir).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+
+        let sig = repo.signature().unwrap();
+
+        // First commit
+        fs::write(dir.join("file.txt"), "version 1").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("file.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+
+        let first_commit_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "First commit", &tree, &[])
+            .unwrap();
+        let first_sha = first_commit_oid.to_string();
+
+        // Second commit
+        fs::write(dir.join("file.txt"), "version 2").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("file.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let first_commit = repo.find_commit(first_commit_oid).unwrap();
+
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "Second commit",
+            &tree,
+            &[&first_commit],
+        )
+        .unwrap();
+
+        // Verify we're at second commit
+        let current = head(dir.to_str().unwrap()).unwrap();
+        assert!(current.message.contains("Second commit"));
+
+        // Checkout first commit
+        let result = checkout(dir.to_str().unwrap(), &first_sha);
+        assert!(result.is_ok());
+
+        // Verify we're back at first commit
+        let after_checkout = head(dir.to_str().unwrap()).unwrap();
+        assert_eq!(after_checkout.sha, first_sha);
+        assert!(after_checkout.message.contains("First commit"));
+
+        // Verify file content is rolled back
+        let content = fs::read_to_string(dir.join("file.txt")).unwrap();
+        assert_eq!(content, "version 1");
+    }
+
+    #[test]
+    fn test_ls_remote_returns_sha() {
+        // Test against a known public repo
+        let result = ls_remote("https://github.com/octocat/Hello-World.git", "master");
+
+        assert!(result.is_ok());
+        let sha = result.unwrap();
+        // SHA-1 is 40 hex chars
+        assert_eq!(sha.len(), 40);
+        assert!(sha.chars().all(|c: char| c.is_ascii_hexdigit()));
     }
 }
