@@ -254,8 +254,16 @@ defmodule Nopea.Git do
       {:ok,
        %{
          "ok" =>
-           %{"sha" => _, "author" => _, "email" => _, "message" => _, "timestamp" => _} = info
-       }} ->
+           %{
+             "sha" => sha,
+             "author" => author,
+             "email" => email,
+             "message" => message,
+             "timestamp" => timestamp
+           } = info
+       }}
+      when is_binary(sha) and is_binary(author) and is_binary(email) and
+             is_binary(message) and is_integer(timestamp) ->
         {:ok, atomize_keys(info)}
 
       {:ok, %{"err" => reason}} ->
