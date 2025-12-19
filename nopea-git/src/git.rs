@@ -76,8 +76,25 @@ pub fn ls_remote(url: &str, branch: &str) -> Result<String, GitError> {
     let mut callbacks = RemoteCallbacks::new();
     callbacks.credentials(|_url, username_from_url, _allowed_types| {
         if let Some(username) = username_from_url {
-            Cred::ssh_key_from_agent(username)
+            // Try SSH key authentication via SSH agent for the provided username.
+            // If this fails, log a clear message so users can diagnose auth issues.
+            match Cred::ssh_key_from_agent(username) {
+                Ok(cred) => Ok(cred),
+                Err(err) => {
+                    eprintln!(
+                        "git ls_remote: SSH key authentication via agent failed for user '{}': {}",
+                        username,
+                        err
+                    );
+                    Err(err)
+                }
+            }
         } else {
+            // No username provided by URL/libgit2; fall back to default credentials.
+            // This may still fail, but at least log that we're not using SSH agent keys.
+            eprintln!(
+                "git ls_remote: no username provided for remote URL; using default git credentials"
+            );
             Cred::default()
         }
     });
