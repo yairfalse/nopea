@@ -281,8 +281,21 @@ defmodule Nopea.Git do
 
   defp atomize_keys(map) when is_map(map) do
     Map.new(map, fn
-      {k, v} when is_binary(k) -> {String.to_atom(k), v}
-      {k, v} -> {k, v}
+      {k, v} when is_binary(k) ->
+        atom_key =
+          case k do
+            "sha" -> :sha
+            "author" -> :author
+            "email" -> :email
+            "message" -> :message
+            "timestamp" -> :timestamp
+            _ -> k
+          end
+
+        {atom_key, v}
+
+      {k, v} ->
+        {k, v}
     end)
   end
 
