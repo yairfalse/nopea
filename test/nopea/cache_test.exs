@@ -3,7 +3,10 @@ defmodule Nopea.CacheTest do
 
   alias Nopea.Cache
 
-  # Application is started by test_helper.exs
+  setup do
+    start_supervised!(Nopea.Cache)
+    :ok
+  end
 
   describe "commits cache" do
     test "stores and retrieves commit for repo" do

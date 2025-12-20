@@ -1,10 +1,11 @@
 import Config
 
 # Test configuration
+# Disable all services for manual control in tests
 config :nopea,
-  # Disable controller in tests (requires K8s cluster)
   enable_controller: false,
-  # Disable Git GenServer in tests (requires Rust binary)
-  enable_git: false
+  enable_git: false,
+  enable_cache: false,
+  enable_supervisor: false
 
 config :logger, level: :warning
