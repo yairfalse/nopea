@@ -1,10 +1,13 @@
 defmodule Nopea.ControllerTest do
   use ExUnit.Case, async: false
 
+  require Logger
   alias Nopea.Controller
 
   # Unit tests run without K8s cluster
   # Integration tests require K8s cluster and are tagged
+  # Suppress noisy K8s connection errors in unit tests
+  @moduletag capture_log: true
 
   describe "interval parsing" do
     # Test interval parsing through config extraction
@@ -273,6 +276,59 @@ defmodule Nopea.ControllerTest do
         GenServer.stop(pid)
       end
     end
+
+    test "MODIFIED event updates resource version when spec unchanged" do
+      {:ok, pid} = Controller.start_link(namespace: "mod-test")
+      Process.sleep(100)
+
+      # Set up state with tracked repo (generation matches observed)
+      :sys.replace_state(pid, fn state ->
+        %{state | repos: Map.put(state.repos, "mod-repo", "v1")}
+      end)
+
+      # Send MODIFIED event with same generation as observedGeneration
+      # This means spec didn't change - just status update
+      event = %{
+        "type" => "MODIFIED",
+        "object" =>
+          build_git_repository_with_generation("mod-repo", "mod-test", 1, 1, %{
+            "url" => "https://github.com/example/repo.git"
+          })
+      }
+
+      send(pid, {:watch_event, event})
+      Process.sleep(50)
+
+      # Resource version should be updated
+      state = :sys.get_state(pid)
+      assert Map.has_key?(state.repos, "mod-repo")
+      # Version updated from "v1" to "1" (from the new resource)
+      assert state.repos["mod-repo"] == "1"
+
+      GenServer.stop(pid)
+    end
+
+    test "unknown event type is ignored" do
+      {:ok, pid} = Controller.start_link(namespace: "unknown-test")
+      Process.sleep(100)
+
+      initial_state = :sys.get_state(pid)
+
+      # Send unknown event type
+      event = %{
+        "type" => "UNKNOWN_TYPE",
+        "object" => %{"metadata" => %{"name" => "test"}}
+      }
+
+      send(pid, {:watch_event, event})
+      Process.sleep(50)
+
+      # State should be unchanged
+      state = :sys.get_state(pid)
+      assert state.repos == initial_state.repos
+
+      GenServer.stop(pid)
+    end
   end
 
   # Helper functions
@@ -287,6 +343,23 @@ defmodule Nopea.ControllerTest do
         "resourceVersion" => "1"
       },
       "spec" => spec
+    }
+  end
+
+  defp build_git_repository_with_generation(name, namespace, generation, observed, spec) do
+    %{
+      "apiVersion" => "nopea.io/v1alpha1",
+      "kind" => "GitRepository",
+      "metadata" => %{
+        "name" => name,
+        "namespace" => namespace,
+        "resourceVersion" => "1",
+        "generation" => generation
+      },
+      "spec" => spec,
+      "status" => %{
+        "observedGeneration" => observed
+      }
     }
   end
 
