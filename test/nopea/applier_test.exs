@@ -169,7 +169,9 @@ defmodule Nopea.ApplierTest do
   describe "read_manifests_from_path/1" do
     setup do
       # Create a temp directory for test files
-      tmp_dir = Path.join(System.tmp_dir!(), "nopea_applier_test_#{System.unique_integer([:positive])}")
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "nopea_applier_test_#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp_dir)
 
       on_exit(fn ->
@@ -238,6 +240,8 @@ defmodule Nopea.ApplierTest do
 
       assert {:ok, manifests} = Applier.read_manifests_from_path(tmp_dir)
       assert length(manifests) == 2
+      assert Enum.at(manifests, 0)["metadata"]["name"] == "config-1"
+      assert Enum.at(manifests, 1)["metadata"]["name"] == "config-2"
     end
 
     test "reads .yml extension files", %{tmp_dir: tmp_dir} do
