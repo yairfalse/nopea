@@ -12,9 +12,14 @@ defmodule Nopea.Webhook do
   @type provider :: :github | :gitlab | :unknown
   @type parsed_event :: %{
           commit: String.t(),
+          branch: String.t(),
           ref: String.t(),
           repository: String.t()
         }
+
+  # Valid commit SHA patterns: 40 hex chars (SHA-1) or 64 hex chars (SHA-256)
+  # Also accepts all-zeros for branch deletion events
+  @commit_sha_pattern ~r/^[0-9a-f]{40}$|^[0-9a-f]{64}$/
 
   @doc """
   Detects the webhook provider from request headers.
@@ -48,29 +53,44 @@ defmodule Nopea.Webhook do
   @spec parse_payload(map(), provider()) :: {:ok, parsed_event()} | {:error, atom()}
   def parse_payload(payload, :github) do
     # GitHub push events have "ref" and "after" fields
-    if Map.has_key?(payload, "ref") and Map.has_key?(payload, "after") do
+    with {:has_fields, true} <-
+           {:has_fields, Map.has_key?(payload, "ref") and Map.has_key?(payload, "after")},
+         commit when is_binary(commit) <- payload["after"],
+         {:valid_sha, true} <- {:valid_sha, valid_commit_sha?(commit)} do
+      ref = payload["ref"]
+
       {:ok,
        %{
-         commit: payload["after"],
-         ref: payload["ref"],
+         commit: commit,
+         branch: extract_branch(ref),
+         ref: ref,
          repository: get_in(payload, ["repository", "full_name"]) || "unknown"
        }}
     else
-      {:error, :unsupported_event}
+      {:has_fields, false} -> {:error, :unsupported_event}
+      nil -> {:error, :unsupported_event}
+      {:valid_sha, false} -> {:error, :invalid_commit_sha}
     end
   end
 
   def parse_payload(payload, :gitlab) do
     # GitLab push events have object_kind == "push"
-    if payload["object_kind"] == "push" do
+    with {:is_push, true} <- {:is_push, payload["object_kind"] == "push"},
+         commit when is_binary(commit) <- payload["after"],
+         {:valid_sha, true} <- {:valid_sha, valid_commit_sha?(commit)} do
+      ref = payload["ref"]
+
       {:ok,
        %{
-         commit: payload["after"],
-         ref: payload["ref"],
+         commit: commit,
+         branch: extract_branch(ref),
+         ref: ref,
          repository: get_in(payload, ["project", "path_with_namespace"]) || "unknown"
        }}
     else
-      {:error, :unsupported_event}
+      {:is_push, false} -> {:error, :unsupported_event}
+      nil -> {:error, :unsupported_event}
+      {:valid_sha, false} -> {:error, :invalid_commit_sha}
     end
   end
 
@@ -111,6 +131,14 @@ defmodule Nopea.Webhook do
   def verify_signature(_payload, _signature, _secret, :unknown) do
     {:error, :invalid_signature}
   end
+
+  @doc false
+  @spec valid_commit_sha?(String.t()) :: boolean()
+  def valid_commit_sha?(sha) when is_binary(sha) do
+    Regex.match?(@commit_sha_pattern, sha)
+  end
+
+  def valid_commit_sha?(_), do: false
 
   @doc """
   Extracts the branch name from a ref string.

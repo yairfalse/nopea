@@ -9,12 +9,17 @@ defmodule Nopea.WebhookTest do
   # Suppress warning logs in tests
   @moduletag capture_log: true
 
+  # Valid 40-character SHA-1 hashes for testing
+  @valid_sha_1 "abc123def456789012345678901234567890abcd"
+  @valid_sha_2 "def456abc123789012345678901234567890efab"
+
   describe "GitHub push events" do
-    test "parses push event and extracts commit" do
-      payload = github_push_payload("abc123def456")
+    test "parses push event and extracts commit and branch" do
+      payload = github_push_payload(@valid_sha_1)
 
       assert {:ok, parsed} = Webhook.parse_payload(payload, :github)
-      assert parsed.commit == "abc123def456"
+      assert parsed.commit == @valid_sha_1
+      assert parsed.branch == "main"
       assert parsed.ref == "refs/heads/main"
       assert parsed.repository == "octocat/Hello-World"
     end
@@ -24,14 +29,21 @@ defmodule Nopea.WebhookTest do
 
       assert {:error, :unsupported_event} = Webhook.parse_payload(payload, :github)
     end
+
+    test "returns error for invalid commit SHA" do
+      payload = github_push_payload("not-a-valid-sha")
+
+      assert {:error, :invalid_commit_sha} = Webhook.parse_payload(payload, :github)
+    end
   end
 
   describe "GitLab push events" do
-    test "parses push event and extracts commit" do
-      payload = gitlab_push_payload("def456abc123")
+    test "parses push event and extracts commit and branch" do
+      payload = gitlab_push_payload(@valid_sha_2)
 
       assert {:ok, parsed} = Webhook.parse_payload(payload, :gitlab)
-      assert parsed.commit == "def456abc123"
+      assert parsed.commit == @valid_sha_2
+      assert parsed.branch == "main"
       assert parsed.ref == "refs/heads/main"
       assert parsed.repository == "group/project"
     end
@@ -40,6 +52,36 @@ defmodule Nopea.WebhookTest do
       payload = %{"object_kind" => "merge_request"}
 
       assert {:error, :unsupported_event} = Webhook.parse_payload(payload, :gitlab)
+    end
+
+    test "returns error for invalid commit SHA" do
+      payload = gitlab_push_payload("short")
+
+      assert {:error, :invalid_commit_sha} = Webhook.parse_payload(payload, :gitlab)
+    end
+  end
+
+  describe "valid_commit_sha?/1" do
+    test "accepts valid 40-character SHA-1 hash" do
+      assert Webhook.valid_commit_sha?("abc123def456789012345678901234567890abcd")
+    end
+
+    test "accepts valid 64-character SHA-256 hash" do
+      sha256 = String.duplicate("a", 64)
+      assert Webhook.valid_commit_sha?(sha256)
+    end
+
+    test "rejects short strings" do
+      refute Webhook.valid_commit_sha?("abc123")
+    end
+
+    test "rejects strings with invalid characters" do
+      refute Webhook.valid_commit_sha?("ghijklmnopqrstuvwxyz12345678901234567890")
+    end
+
+    test "rejects non-strings" do
+      refute Webhook.valid_commit_sha?(nil)
+      refute Webhook.valid_commit_sha?(123)
     end
   end
 
@@ -142,7 +184,7 @@ defmodule Nopea.WebhookTest do
     end
 
     test "returns 200 for valid GitHub push webhook" do
-      payload = Jason.encode!(github_push_payload("abc123"))
+      payload = Jason.encode!(github_push_payload(@valid_sha_1))
       signature = compute_github_signature(payload, "test-secret")
 
       conn =
@@ -160,7 +202,7 @@ defmodule Nopea.WebhookTest do
     end
 
     test "returns 401 for invalid signature" do
-      payload = Jason.encode!(github_push_payload("abc123"))
+      payload = Jason.encode!(github_push_payload(@valid_sha_1))
 
       conn =
         conn(:post, "/webhook/test-repo", payload)
@@ -177,7 +219,7 @@ defmodule Nopea.WebhookTest do
     end
 
     test "returns 401 for missing GitHub signature header" do
-      payload = Jason.encode!(github_push_payload("abc123"))
+      payload = Jason.encode!(github_push_payload(@valid_sha_1))
 
       conn =
         conn(:post, "/webhook/test-repo", payload)
@@ -193,7 +235,7 @@ defmodule Nopea.WebhookTest do
     end
 
     test "returns 401 for missing GitLab token header" do
-      payload = Jason.encode!(gitlab_push_payload("abc123"))
+      payload = Jason.encode!(gitlab_push_payload(@valid_sha_2))
 
       conn =
         conn(:post, "/webhook/test-repo", payload)
@@ -209,7 +251,7 @@ defmodule Nopea.WebhookTest do
     end
 
     test "returns 500 when webhook secret not configured" do
-      payload = Jason.encode!(github_push_payload("abc123"))
+      payload = Jason.encode!(github_push_payload(@valid_sha_1))
       signature = compute_github_signature(payload, "any-secret")
 
       conn =
@@ -241,7 +283,7 @@ defmodule Nopea.WebhookTest do
     end
 
     test "returns 400 for invalid repo name" do
-      payload = Jason.encode!(github_push_payload("abc123"))
+      payload = Jason.encode!(github_push_payload(@valid_sha_1))
 
       conn =
         conn(:post, "/webhook/repo<script>", payload)
@@ -255,7 +297,7 @@ defmodule Nopea.WebhookTest do
     end
 
     test "returns 200 for valid GitLab push webhook" do
-      payload = Jason.encode!(gitlab_push_payload("def456"))
+      payload = Jason.encode!(gitlab_push_payload(@valid_sha_2))
       token = "gitlab-secret"
 
       conn =
@@ -286,6 +328,40 @@ defmodule Nopea.WebhookTest do
 
       assert conn.status == 200
       assert conn.resp_body =~ "ok"
+    end
+
+    test "notifies Worker when webhook is received" do
+      # Start Registry for worker lookup
+      start_supervised!({Registry, keys: :unique, name: Nopea.Registry})
+
+      # Start a mock worker registered under the repo name
+      repo_name = "webhook-worker-test"
+
+      {:ok, worker_pid} =
+        Agent.start_link(fn -> [] end, name: {:via, Registry, {Nopea.Registry, repo_name}})
+
+      # Intercept messages sent to the worker using erlang tracing
+      :erlang.trace(worker_pid, true, [:receive])
+
+      payload = Jason.encode!(github_push_payload(@valid_sha_1))
+      signature = compute_github_signature(payload, "test-secret")
+
+      conn =
+        conn(:post, "/webhook/#{repo_name}", payload)
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-github-event", "push")
+        |> put_req_header("x-hub-signature-256", signature)
+
+      Application.put_env(:nopea, :webhook_secret, "test-secret")
+
+      conn = Router.call(conn, Router.init([]))
+
+      assert conn.status == 200
+
+      # Verify the worker received the webhook message
+      assert_receive {:trace, ^worker_pid, :receive, {:webhook, @valid_sha_1}}, 1000
+
+      Agent.stop(worker_pid)
     end
   end
 end
