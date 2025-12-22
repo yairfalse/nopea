@@ -128,20 +128,18 @@ defmodule Nopea.Webhook.Router do
     end
   end
 
-  defp get_signature(headers, :github) do
-    headers
-    |> Enum.find(fn {k, _v} -> String.downcase(k) == "x-hub-signature-256" end)
-    |> case do
-      {_, sig} -> sig
-      nil -> ""
-    end
-  end
+  @signature_headers %{
+    github: "x-hub-signature-256",
+    gitlab: "x-gitlab-token"
+  }
 
-  defp get_signature(headers, :gitlab) do
+  defp get_signature(headers, provider) when provider in [:github, :gitlab] do
+    header_name = Map.fetch!(@signature_headers, provider)
+
     headers
-    |> Enum.find(fn {k, _v} -> String.downcase(k) == "x-gitlab-token" end)
+    |> Enum.find(fn {k, _v} -> String.downcase(k) == header_name end)
     |> case do
-      {_, token} -> token
+      {_, value} -> value
       nil -> ""
     end
   end
