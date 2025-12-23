@@ -276,6 +276,66 @@ defmodule Nopea.DriftTest do
     end
   end
 
+  describe "git_changed?/2" do
+    test "returns false when manifests match" do
+      manifest = %{
+        "apiVersion" => "v1",
+        "kind" => "ConfigMap",
+        "metadata" => %{"name" => "my-config"},
+        "data" => %{"key" => "value"}
+      }
+
+      result = Drift.git_changed?(manifest, manifest)
+
+      assert result == false
+    end
+
+    test "returns {:changed, diff} when manifests differ" do
+      last_applied = %{
+        "apiVersion" => "v1",
+        "kind" => "ConfigMap",
+        "metadata" => %{"name" => "my-config"},
+        "data" => %{"key" => "old-value"}
+      }
+
+      desired = %{
+        "apiVersion" => "v1",
+        "kind" => "ConfigMap",
+        "metadata" => %{"name" => "my-config"},
+        "data" => %{"key" => "new-value"}
+      }
+
+      result = Drift.git_changed?(last_applied, desired)
+
+      assert {:changed, %{from: from_hash, to: to_hash}} = result
+      refute from_hash == to_hash
+    end
+
+    test "ignores K8s-managed fields when comparing" do
+      last_applied = %{
+        "apiVersion" => "v1",
+        "kind" => "ConfigMap",
+        "metadata" => %{"name" => "my-config"},
+        "data" => %{"key" => "value"}
+      }
+
+      # Same content but with K8s-added fields
+      desired = %{
+        "apiVersion" => "v1",
+        "kind" => "ConfigMap",
+        "metadata" => %{
+          "name" => "my-config",
+          "resourceVersion" => "12345"
+        },
+        "data" => %{"key" => "value"}
+      }
+
+      result = Drift.git_changed?(last_applied, desired)
+
+      assert result == false
+    end
+  end
+
   describe "compute_hash/1" do
     test "returns consistent hash for same content" do
       manifest = %{

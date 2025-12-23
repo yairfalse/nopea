@@ -1,118 +1,98 @@
 # NOPEA: Lightweight GitOps Controller
 
-**NOPEA = Aluminum (Finnish) — GitOps without the weight**
+**A learning project for BEAM-native GitOps**
 
 ---
 
-## CRITICAL: Project Nature
+## PROJECT STATUS
 
-**THIS IS A FUN LEARNING PROJECT**
-- **Goal**: Build a BEAM-native GitOps controller
-- **Language**: 100% Elixir
-- **Status**: Just starting - exploring OTP patterns
+**What's Implemented:**
+- Worker GenServer per GitRepository (full sync logic)
+- ETS cache (4 tables, no Redis)
+- K8s CRD controller (watch + reconcile)
+- Git operations via Rust Port (libgit2)
+- YAML manifest parsing + K8s server-side apply
+- Three-way drift detection
+- Webhook endpoint (GitHub + GitLab)
+- CDEvents emission (async, retrying)
+- ULID generator (monotonic)
+- Health/readiness probes
 
----
-
-## PROJECT MISSION
-
-**Mission**: Make GitOps simple with BEAM superpowers
-
-**Core Value Proposition:**
-
-**"GitOps with process isolation - one GenServer per repo, no Redis, no database"**
-
-**The Differentiators:**
-1. **BEAM-native** - Process isolation, supervision trees, ETS caching
-2. **CDEvents built-in** - Full pipeline observability
-3. **Lightweight** - No external dependencies
-4. **Works with KULTA** - Progressive delivery integration
+**Code Stats:**
+- ~3200 lines Elixir across 15 modules
+- ~300 lines Rust (nopea-git binary)
+- ~2800 lines tests (14 test files)
+- Strong typespecs throughout
 
 ---
 
-## ARCHITECTURE
+## ARCHITECTURE OVERVIEW
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    NOPEA                                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   OTP Application                                               │
-│   ├── Cache (ETS tables)                                        │
-│   ├── Supervisor (DynamicSupervisor)                            │
-│   │   ├── Worker (repo: my-app)                                 │
-│   │   ├── Worker (repo: other-app)                              │
-│   │   └── ...                                                   │
-│   ├── Watcher (K8s CRD watch)                                   │
-│   └── Webhook.Endpoint (Plug/Cowboy)                            │
-│                                                                 │
-│   Key Insight: Worker crash = only that repo affected           │
-│                                                                 │
+│                         BEAM VM                                  │
+│                                                                  │
+│  application.ex                                                  │
+│  └── Supervisor tree: Cache, ULID, Emitter, Controller, Workers  │
+│                                                                  │
+│  worker.ex (503 lines)                                           │
+│  ├── GenServer per GitRepository                                 │
+│  ├── :startup_sync - initial clone/fetch                         │
+│  ├── :poll - periodic git fetch                                  │
+│  ├── :reconcile - drift detection (2x poll interval)             │
+│  └── :webhook - external trigger                                 │
+│                                                                  │
+│  cache.ex (4 ETS tables)                                         │
+│  ├── :nopea_commits - last synced commit per repo                │
+│  ├── :nopea_resources - resource hashes for change detection     │
+│  ├── :nopea_sync_states - full sync state                        │
+│  └── :nopea_last_applied - for three-way drift detection         │
+│                                                                  │
+│  git.ex (Rust Port via msgpack)                                  │
+│  ├── sync(url, branch, path, depth) - clone or fetch+reset       │
+│  ├── files(path, subpath) - list YAML files                      │
+│  ├── read(path, file) - read file as base64                      │
+│  ├── head(path) - get commit info                                │
+│  └── ls_remote(url, branch) - cheap remote check                 │
+│                                                                  │
+│  drift.ex                                                        │
+│  └── three_way_diff(last_applied, desired, live)                 │
+│      → :no_drift | {:git_change, diff} | {:manual_drift, diff}   │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### Key Design Decisions
+
+1. **One GenServer per repo** - Crash isolation, supervisor restarts
+2. **ETS not Redis** - State recoverable from Git/K8s, no external deps
+3. **Rust Port for Git** - libgit2 reliability, msgpack protocol
+4. **Three-way drift** - Distinguishes manual changes from git changes
+5. **Async CDEvents** - Queue with exponential backoff retry
 
 ---
 
 ## ELIXIR REQUIREMENTS
 
-### Language Requirements
-- **THIS IS AN ELIXIR PROJECT** - All code in Elixir
-- **OTP PATTERNS** - GenServer, Supervisor, DynamicSupervisor
-- **STRONG TYPING** - Use typespecs and dialyzer
+### Absolute Rules
 
----
+1. **No bare `raise`** - Use `{:error, reason}` tuples
+2. **No `IO.puts`** - Use `require Logger; Logger.info(...)`
+3. **No string enums** - Use atoms: `:syncing` not `"syncing"`
+4. **Always handle errors** - Pattern match `{:ok, _}` and `{:error, _}`
 
-## ELIXIR CODE QUALITY - INSTANT REJECTION
-
-### No Bare Raises in Production
+### Error Handling Pattern
 
 ```elixir
-# BANNED
-raise "Something went wrong"
-
-# REQUIRED
-{:error, :sync_failed}
-# OR
-{:error, {:git_error, reason}}
-```
-
-### No IO.puts in Production
-
-```elixir
-# BANNED
-IO.puts("Syncing: #{name}")
-
-# REQUIRED
-require Logger
-Logger.info("Syncing repository", repo: name)
-```
-
-### No String-Based State
-
-```elixir
-# BANNED
-%{phase: "syncing"}
-
-# REQUIRED
-defmodule Nopea.Phase do
-  @type t :: :pending | :syncing | :synced | :failed
-end
-
-%{phase: :syncing}
-```
-
-### Always Handle :ok/:error Tuples
-
-```elixir
-# BANNED
+# BAD
 {:ok, result} = some_function()
 
-# REQUIRED
+# GOOD
 case some_function() do
   {:ok, result} -> handle_success(result)
   {:error, reason} -> handle_error(reason)
 end
 
-# OR with with
+# OR with `with`
 with {:ok, repo} <- fetch_repo(name),
      {:ok, manifests} <- parse_manifests(repo) do
   apply_manifests(manifests)
@@ -121,9 +101,52 @@ else
 end
 ```
 
+### Logging Pattern
+
+```elixir
+# BAD
+IO.puts("Syncing: #{name}")
+
+# GOOD
+require Logger
+Logger.info("Syncing repository", repo: name, commit: sha)
+Logger.warning("Sync failed", repo: name, error: reason)
+```
+
 ---
 
-## OTP PATTERNS
+## TDD WORKFLOW
+
+**RED → GREEN → REFACTOR** - Always.
+
+### RED: Write Failing Test First
+
+```elixir
+defmodule Nopea.WorkerTest do
+  use ExUnit.Case, async: true
+
+  test "sync_now triggers git fetch and apply" do
+    repo = %{name: "test-repo", url: "https://github.com/org/repo.git"}
+    {:ok, pid} = Nopea.Worker.start_link(repo)
+
+    result = Nopea.Worker.sync_now(pid)
+
+    assert {:ok, %{commit: _}} = result
+  end
+end
+```
+
+### GREEN: Minimal Implementation
+
+Write just enough code to make the test pass.
+
+### REFACTOR: Clean Up
+
+Add typespecs, docs, edge cases. Tests must still pass.
+
+---
+
+## OTP PATTERNS IN THE CODEBASE
 
 ### GenServer State
 
@@ -139,32 +162,14 @@ defmodule Nopea.Worker do
     :retry_count,
     :sync_timer
   ]
-
-  @type t :: %__MODULE__{
-    repo_name: String.t(),
-    repo_url: String.t(),
-    branch: String.t(),
-    last_commit: String.t() | nil,
-    retry_count: non_neg_integer(),
-    sync_timer: reference() | nil
-  }
 end
 ```
 
-### Supervisor Child Spec
+### DynamicSupervisor
 
 ```elixir
 defmodule Nopea.Supervisor do
   use DynamicSupervisor
-
-  def start_link(opts) do
-    DynamicSupervisor.start_link(__MODULE__, opts, name: __MODULE__)
-  end
-
-  @impl true
-  def init(_opts) do
-    DynamicSupervisor.init(strategy: :one_for_one)
-  end
 
   def start_worker(git_repository) do
     spec = {Nopea.Worker, git_repository}
@@ -180,454 +185,101 @@ defmodule Nopea.Supervisor do
 end
 ```
 
-### ETS Table Creation
+### ETS Tables
 
 ```elixir
-defmodule Nopea.Cache do
-  use GenServer
-
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  end
-
-  @impl true
-  def init(_opts) do
-    :ets.new(:commits, [:set, :public, :named_table])
-    :ets.new(:manifests, [:set, :public, :named_table])
-    :ets.new(:hashes, [:set, :public, :named_table])
-    {:ok, %{}}
-  end
-
-  def get_last_commit(repo_name) do
-    case :ets.lookup(:commits, repo_name) do
-      [{^repo_name, commit, _timestamp}] -> {:ok, commit}
-      [] -> {:error, :not_found}
-    end
-  end
-
-  def set_last_commit(repo_name, commit) do
-    :ets.insert(:commits, {repo_name, commit, System.system_time()})
-    :ok
-  end
-end
-```
-
----
-
-## TDD Workflow (RED → GREEN → REFACTOR)
-
-**MANDATORY**: All code must follow strict Test-Driven Development
-
-### RED Phase: Write Failing Test First
-
-```elixir
-# Step 1: Write test that FAILS (RED)
-defmodule Nopea.WorkerTest do
-  use ExUnit.Case, async: true
-
-  test "sync_now triggers git fetch and apply" do
-    # Arrange
-    repo = %{name: "test-repo", url: "https://github.com/org/repo.git"}
-    {:ok, pid} = Nopea.Worker.start_link(repo)
-
-    # Act
-    result = Nopea.Worker.sync_now(pid)
-
-    # Assert
-    assert {:ok, %{commit: _commit}} = result
-  end
-end
-
-# Step 2: Verify test FAILS
-# $ mix test
-# test_sync_now_triggers_git_fetch_and_apply ... FAILED (RED phase confirmed)
-```
-
-### GREEN Phase: Minimal Implementation
-
-```elixir
-# Step 3: Write MINIMAL code to pass test
-defmodule Nopea.Worker do
-  use GenServer
-
-  def start_link(repo) do
-    GenServer.start_link(__MODULE__, repo)
-  end
-
-  def sync_now(pid) do
-    GenServer.call(pid, :sync_now)
-  end
-
-  @impl true
-  def init(repo) do
-    {:ok, %{repo: repo, last_commit: nil}}
-  end
-
-  @impl true
-  def handle_call(:sync_now, _from, state) do
-    case do_sync(state.repo) do
-      {:ok, commit} ->
-        {:reply, {:ok, %{commit: commit}}, %{state | last_commit: commit}}
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
-  end
-
-  defp do_sync(repo) do
-    # Minimal implementation
-    {:ok, "abc123"}
-  end
-end
-
-# Step 4: Verify tests PASS
-# $ mix test
-# test_sync_now_triggers_git_fetch_and_apply ... ok (GREEN phase confirmed)
-```
-
-### TDD Checklist
-
-- [ ] **RED**: Write failing test first
-- [ ] **RED**: Verify `mix test` fails
-- [ ] **GREEN**: Write minimal implementation
-- [ ] **GREEN**: Verify `mix test` passes
-- [ ] **REFACTOR**: Improve design, add edge cases
-- [ ] **REFACTOR**: Verify tests still pass
-- [ ] **Commit**: Incremental commits
-
----
-
-## ERROR HANDLING PATTERNS
-
-### Use Tagged Tuples
-
-```elixir
-# Good: Explicit error types
-@type sync_error ::
-  {:git_error, term()} |
-  {:parse_error, term()} |
-  {:apply_error, term()}
-
-@spec sync(String.t()) :: {:ok, String.t()} | {:error, sync_error()}
-def sync(repo_name) do
-  with {:ok, repo} <- Git.fetch(repo_name),
-       {:ok, manifests} <- Parser.parse(repo.path),
-       {:ok, _} <- Applier.apply(manifests) do
-    {:ok, repo.commit}
-  end
-end
-```
-
-### Let It Crash (Supervisor Handles)
-
-```elixir
-# Worker crashes are OK - supervisor restarts
-defmodule Nopea.Worker do
-  use GenServer, restart: :permanent
-
-  @impl true
-  def handle_info(:poll, state) do
-    # If this crashes, supervisor restarts the worker
-    # State is lost but that's OK - we recover from K8s/Git
-    new_state = do_sync!(state)
-    {:noreply, new_state}
-  end
-end
-```
-
-### Backoff on Retries
-
-```elixir
-defp schedule_retry(state) do
-  delay = min(state.retry_count * 1000, 60_000)
-  timer = Process.send_after(self(), :retry_sync, delay)
-  %{state | retry_count: state.retry_count + 1, sync_timer: timer}
-end
-
-defp reset_retry(state) do
-  %{state | retry_count: 0}
-end
+# Public tables - Worker crashes don't lose data
+:ets.new(:nopea_commits, [:set, :public, :named_table])
+:ets.new(:nopea_resources, [:set, :public, :named_table])
+:ets.new(:nopea_sync_states, [:set, :public, :named_table])
+:ets.new(:nopea_last_applied, [:set, :public, :named_table])
 ```
 
 ---
 
 ## VERIFICATION CHECKLIST
 
-Before EVERY commit:
+Before every commit:
 
 ```bash
-# 1. Format - MANDATORY
+# Format
 mix format
 
-# 2. Credo - MANDATORY
+# Lint
 mix credo --strict
 
-# 3. Dialyzer - MANDATORY
+# Type check
 mix dialyzer
 
-# 4. Tests - MANDATORY
+# Tests
 mix test
 
-# 5. No IO.puts in lib/
+# No IO.puts
 grep -r "IO.puts\|IO.inspect" lib/
 
-# 6. No bare raises
+# No bare raises
 grep -r "raise \"" lib/
-
-# 7. No TODOs
-grep -r "TODO\|FIXME" lib/
 ```
 
 ---
 
-## AI AGENT WORKFLOW
+## FILE LOCATIONS
 
-When implementing features:
-
-### Step 1: UNDERSTAND
-- Read relevant source files
-- Check existing tests
-- Ask clarifying questions if unclear
-
-### Step 2: RED (Write Failing Test)
-```
-Agent: "I'll write the test first. Here's the failing test..."
-[Provides complete test code]
-Agent: "This should FAIL. Run mix test to verify RED phase."
-```
-
-### Step 3: GREEN (Minimal Implementation)
-```
-Agent: "Here's the minimal implementation to make the test pass..."
-[Provides complete implementation]
-Agent: "This should PASS. Run mix test to verify GREEN phase."
-```
-
-### Step 4: REFACTOR (Improve Code)
-```
-Agent: "Now let's improve the implementation..."
-[Adds error handling, typespecs, docs]
-Agent: "Tests should still pass. Run mix test to verify."
-```
-
-### Step 5: COMMIT
-```
-Agent: "Ready to commit. Suggested message:
-feat: add Worker GenServer for repo sync
-
-- GenServer per GitRepository
-- ETS cache integration
-- Exponential backoff on failure
-- Tests passing"
-```
+| What | Where |
+|------|-------|
+| OTP Application | `lib/nopea/application.ex` |
+| Worker GenServer | `lib/nopea/worker.ex` |
+| DynamicSupervisor | `lib/nopea/supervisor.ex` |
+| K8s Controller | `lib/nopea/controller.ex` |
+| ETS Cache | `lib/nopea/cache.ex` |
+| Rust Port interface | `lib/nopea/git.ex` |
+| K8s client | `lib/nopea/k8s.ex` |
+| YAML parser + applier | `lib/nopea/applier.ex` |
+| Drift detection | `lib/nopea/drift.ex` |
+| ULID generator | `lib/nopea/ulid.ex` |
+| Webhook parsing | `lib/nopea/webhook.ex` |
+| CDEvents builder | `lib/nopea/events.ex` |
+| Webhook router | `lib/nopea/webhook/router.ex` |
+| CDEvents emitter | `lib/nopea/events/emitter.ex` |
+| Rust git binary | `nopea-git/src/main.rs` |
+| K8s manifests | `deploy/` |
 
 ---
 
-## GIT WORKFLOW
+## DEPENDENCIES
 
-**ALWAYS use feature branches and PRs. Never commit directly to main.**
+### Elixir (mix.exs)
 
-### Branch Naming
-```bash
-# Format: type/short-description
-feat/add-webhook-endpoint
-fix/worker-retry-logic
-chore/update-deps
-```
+| Package | Purpose |
+|---------|---------|
+| `k8s` | Kubernetes client |
+| `yaml_elixir` | YAML parsing |
+| `req` | HTTP client |
+| `jason` | JSON encoding |
+| `msgpax` | Rust Port protocol |
+| `plug_cowboy` | Webhook server |
+| `telemetry` | Observability |
+| `mox` | Test mocking |
 
-### Workflow
-1. Create feature branch from main
-2. Make changes with incremental commits
-3. Push branch to origin
-4. Create PR via `gh pr create`
-5. Merge after review
+### Rust (nopea-git/Cargo.toml)
 
-### Example
-```bash
-git checkout -b feat/add-sync-status
-# ... make changes ...
-git add . && git commit -m "feat: add sync status tracking"
-git push -u origin feat/add-sync-status
-gh pr create --title "Add sync status tracking" --body "..."
-```
+| Crate | Purpose |
+|-------|---------|
+| `git2` | libgit2 bindings |
+| `rmp-serde` | MessagePack |
+| `base64` | File encoding |
+| `thiserror` | Error types |
 
 ---
 
-## NO STUBS, NO TODOs
+## AGENT INSTRUCTIONS
 
-```elixir
-# BANNED
-def apply_manifests(manifests) do
-  # TODO: implement
-  :ok
-end
+When working on this codebase:
 
-# REQUIRED
-def apply_manifests(manifests) do
-  Enum.reduce_while(manifests, {:ok, []}, fn manifest, {:ok, acc} ->
-    case K8s.Client.apply(manifest) do
-      {:ok, result} -> {:cont, {:ok, [result | acc]}}
-      {:error, reason} -> {:halt, {:error, reason}}
-    end
-  end)
-end
-```
+1. **Read first** - Understand OTP patterns before changing
+2. **TDD always** - Write failing test, implement, refactor
+3. **No stubs** - Complete implementations only
+4. **Typespecs required** - All public functions
+5. **Run checks** - `mix format && mix credo --strict && mix test`
 
----
-
-## DOCUMENTATION REQUIREMENTS
-
-### Module Docs
-
-```elixir
-defmodule Nopea.Worker do
-  @moduledoc """
-  GenServer that manages a single GitRepository.
-
-  One Worker process per GitRepository CRD. Handles:
-  - Git clone/fetch operations
-  - YAML manifest parsing
-  - Kubernetes apply via server-side apply
-  - Status updates on the GitRepository CRD
-  - CDEvents emission
-
-  ## State
-
-  - `repo_name` - GitRepository metadata.name
-  - `last_commit` - Last successfully synced commit SHA
-  - `retry_count` - Current retry attempt (for backoff)
-
-  ## Messages
-
-  - `:poll` - Periodic sync trigger
-  - `{:webhook, commit}` - Webhook-triggered sync
-  - `:sync_now` - Manual sync request
-  """
-end
-```
-
-### Function Docs
-
-```elixir
-@doc """
-Trigger immediate sync for this repository.
-
-Returns `{:ok, %{commit: sha}}` on success or `{:error, reason}` on failure.
-
-## Examples
-
-    iex> Nopea.Worker.sync_now(pid)
-    {:ok, %{commit: "abc123"}}
-
-    iex> Nopea.Worker.sync_now(pid)
-    {:error, {:git_error, "network timeout"}}
-"""
-@spec sync_now(pid()) :: {:ok, map()} | {:error, term()}
-def sync_now(pid) do
-  GenServer.call(pid, :sync_now, :timer.seconds(60))
-end
-```
-
-### Typespecs
-
-```elixir
-@type repo_config :: %{
-  name: String.t(),
-  url: String.t(),
-  branch: String.t(),
-  path: String.t() | nil,
-  interval: pos_integer(),
-  target_namespace: String.t()
-}
-
-@type state :: %{
-  config: repo_config(),
-  last_commit: String.t() | nil,
-  retry_count: non_neg_integer(),
-  sync_timer: reference() | nil
-}
-```
-
----
-
-## TESTING PATTERNS
-
-### Use ExUnit Tags
-
-```elixir
-defmodule Nopea.WorkerTest do
-  use ExUnit.Case, async: true
-
-  @moduletag :worker
-
-  describe "sync_now/1" do
-    test "returns commit on success" do
-      # ...
-    end
-
-    test "returns error on git failure" do
-      # ...
-    end
-  end
-end
-```
-
-### Mock External Services
-
-```elixir
-# Use Mox for mocking
-defmodule Nopea.GitBehaviour do
-  @callback fetch(String.t()) :: {:ok, map()} | {:error, term()}
-  @callback clone(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-end
-
-# In test
-defmodule Nopea.WorkerTest do
-  import Mox
-
-  setup :verify_on_exit!
-
-  test "handles git error gracefully" do
-    Nopea.GitMock
-    |> expect(:fetch, fn _url -> {:error, :network_timeout} end)
-
-    {:ok, pid} = Worker.start_link(%{url: "..."})
-    assert {:error, {:git_error, :network_timeout}} = Worker.sync_now(pid)
-  end
-end
-```
-
----
-
-## AGENT CHECKLIST
-
-Before submitting code:
-
-- [ ] Read existing code to understand patterns
-- [ ] Wrote failing test first (RED phase)
-- [ ] Implemented minimal code (GREEN phase)
-- [ ] Added typespecs
-- [ ] Added @moduledoc and @doc
-- [ ] Used Logger, not IO.puts
-- [ ] Used tagged tuples for errors
-- [ ] No TODOs or stubs
-- [ ] Suggested commit message
-- [ ] `mix test` passes
-- [ ] `mix format` clean
-- [ ] `mix credo --strict` passes
-
----
-
-## DEFINITION OF DONE
-
-A feature is complete when:
-
-- [ ] Tests written first (TDD)
-- [ ] All tests pass
-- [ ] Typespecs added
-- [ ] Documentation added
-- [ ] `mix format` applied
-- [ ] `mix credo --strict` passes
-- [ ] `mix dialyzer` passes (if configured)
-- [ ] Commit message explains what/why
-
-**NO STUBS. NO TODOs. COMPLETE CODE OR NOTHING.**
+**This is a learning project** - exploring OTP patterns and BEAM superpowers. Ask questions if unclear.

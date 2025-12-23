@@ -87,9 +87,9 @@ defmodule Nopea.Drift do
     norm_live = normalize(live)
 
     # Compute hashes for comparison
-    last_hash = hash_for_compare(norm_last)
-    desired_hash = hash_for_compare(norm_desired)
-    live_hash = hash_for_compare(norm_live)
+    last_hash = do_hash(norm_last)
+    desired_hash = do_hash(norm_desired)
+    live_hash = do_hash(norm_live)
 
     git_changed = desired_hash != last_hash
     manual_drift = live_hash != last_hash
@@ -110,6 +110,33 @@ defmodule Nopea.Drift do
   end
 
   @doc """
+  Checks if the desired state (from git) differs from the last-applied state.
+
+  This is a simplified two-way comparison for detecting git changes when
+  cluster state is not available. For full three-way drift detection
+  (including manual drift), use `three_way_diff/3`.
+
+  ## Returns
+
+  - `false` - No changes (git matches last-applied)
+  - `{:changed, diff}` - Git has changed since last apply
+  """
+  @spec git_changed?(map(), map()) :: false | {:changed, map()}
+  def git_changed?(last_applied, desired) do
+    norm_last = normalize(last_applied)
+    norm_desired = normalize(desired)
+
+    last_hash = do_hash(norm_last)
+    desired_hash = do_hash(norm_desired)
+
+    if last_hash == desired_hash do
+      false
+    else
+      {:changed, %{from: last_hash, to: desired_hash}}
+    end
+  end
+
+  @doc """
   Computes a normalized hash of a manifest for drift detection.
 
   The manifest is normalized before hashing, so K8s-added fields
@@ -118,16 +145,7 @@ defmodule Nopea.Drift do
   @spec compute_hash(map()) :: {:ok, String.t()} | {:error, term()}
   def compute_hash(manifest) do
     normalized = normalize(manifest)
-
-    case Jason.encode(normalized, pretty: false) do
-      {:ok, json} ->
-        hash = :crypto.hash(:sha256, json) |> Base.encode16(case: :lower)
-        {:ok, "sha256:#{hash}"}
-
-      {:error, reason} ->
-        Logger.error("Failed to encode manifest for hashing: #{inspect(reason)}")
-        {:error, {:encode_error, reason}}
-    end
+    {:ok, "sha256:#{do_hash(normalized)}"}
   end
 
   # Private functions
@@ -164,14 +182,16 @@ defmodule Nopea.Drift do
     end
   end
 
-  defp hash_for_compare(normalized_manifest) do
-    case Jason.encode(normalized_manifest, pretty: false) do
-      {:ok, json} ->
-        :crypto.hash(:sha256, json) |> Base.encode16(case: :lower)
+  # Core hashing implementation - encodes to JSON and hashes with SHA256
+  defp do_hash(normalized_manifest) do
+    # JSON encoding should always succeed for valid K8s manifests
+    # If it fails, we fall back to inspect() for safety
+    json =
+      case Jason.encode(normalized_manifest, pretty: false) do
+        {:ok, encoded} -> encoded
+        {:error, _} -> inspect(normalized_manifest)
+      end
 
-      {:error, _} ->
-        # Fallback - shouldn't happen with valid manifests
-        :crypto.hash(:sha256, inspect(normalized_manifest)) |> Base.encode16(case: :lower)
-    end
+    :crypto.hash(:sha256, json) |> Base.encode16(case: :lower)
   end
 end

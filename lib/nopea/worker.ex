@@ -285,11 +285,9 @@ defmodule Nopea.Worker do
       with {:ok, files} <- list_manifest_files(repo_path, config.path),
            {:ok, manifests} <- read_and_parse_manifests(repo_path, config.path, files) do
         # Check each manifest for drift
-        {drifted, unchanged} = detect_drifted_manifests(config.name, manifests)
+        {drifted, _unchanged} = detect_drifted_manifests(config.name, manifests)
 
-        Logger.debug(
-          "Drift detection for #{config.name}: #{length(drifted)} changed, #{length(unchanged)} unchanged"
-        )
+        Logger.debug("Drift detection for #{config.name}: #{length(drifted)} changed")
 
         # Only re-apply drifted resources
         if Enum.empty?(drifted) do
@@ -329,13 +327,11 @@ defmodule Nopea.Worker do
             true
 
           {:ok, last_applied} ->
-            # Compare desired to last-applied
-            case Drift.three_way_diff(last_applied, desired_normalized, last_applied) do
-              :no_drift -> false
-              {:git_change, _} -> true
-              # For now, without K8s GET, we can't detect manual drift
-              # So we only re-apply on git changes
-              _ -> false
+            # Compare desired to last-applied (two-way comparison)
+            # Full three-way drift detection requires K8s GET (future enhancement)
+            case Drift.git_changed?(last_applied, desired_normalized) do
+              false -> false
+              {:changed, _} -> true
             end
         end
       end)

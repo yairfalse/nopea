@@ -250,7 +250,6 @@ defmodule Nopea.Events do
         environment: %{id: namespace, source: "/nopea"},
         repository: repo_name,
         drift_type: Atom.to_string(drift_type),
-        resource_key: resource_key,
         commit: opts[:commit],
         action: opts[:action] && Atom.to_string(opts[:action])
       }
