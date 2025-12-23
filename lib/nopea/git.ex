@@ -71,12 +71,14 @@ defmodule Nopea.Git do
   @doc """
   Checkout (hard reset) to a specific commit SHA.
 
-  **Warning:** This performs a destructive hard reset and will discard all
-  uncommitted changes in the working directory. Ensure there is no important
-  uncommitted work before calling this function.
+  **Warning**: This performs a destructive hard reset that:
+  - Discards all uncommitted changes in the working directory
+  - Leaves the repository in a detached HEAD state
 
-  Used for rollback to a known good commit.
-  Returns {:ok, sha} or {:error, reason}.
+  The detached HEAD state is intentional for rollback scenarios where we
+  want to deploy a specific commit without modifying branch pointers.
+
+  Returns `{:ok, sha}` or `{:error, reason}`.
   """
   @spec checkout(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def checkout(path, sha) do

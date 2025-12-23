@@ -57,9 +57,12 @@ pub fn head(path: &str) -> Result<CommitInfo, GitError> {
 
 /// Checkout a specific commit by SHA (hard reset).
 ///
-/// **Warning:** This performs a destructive hard reset and will discard all
-/// uncommitted changes in the working directory. The repository will be left
-/// in a detached HEAD state pointing to the specified commit.
+/// **Warning**: This performs a destructive hard reset that:
+/// - Discards all uncommitted changes in the working directory
+/// - Leaves the repository in a detached HEAD state
+///
+/// The detached HEAD state is intentional for rollback scenarios where we
+/// want to deploy a specific commit without modifying branch pointers.
 pub fn checkout(path: &str, sha: &str) -> Result<String, GitError> {
     let repo = Repository::open(path)?;
     let oid = git2::Oid::from_str(sha)?;
@@ -288,6 +291,33 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let result = read_file(temp.path().to_str().unwrap(), "nonexistent.yaml");
         assert!(matches!(result, Err(GitError::FileNotFound(_))));
+    }
+
+    #[test]
+    fn test_head_nonexistent_path() {
+        let result = head("/nonexistent/path/that/does/not/exist");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_head_not_a_git_repo() {
+        let temp = TempDir::new().unwrap();
+        // Directory exists but is not a git repository
+        let result = head(temp.path().to_str().unwrap());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_head_empty_repo_no_commits() {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path();
+
+        // Initialize repo but don't make any commits
+        Repository::init(dir).unwrap();
+
+        let result = head(dir.to_str().unwrap());
+        // Should error because HEAD doesn't point to a valid commit
+        assert!(result.is_err());
     }
 
     #[test]

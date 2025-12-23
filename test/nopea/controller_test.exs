@@ -285,11 +285,12 @@ defmodule Nopea.ControllerTest do
       GenServer.stop(pid)
     end
 
+    @tag :requires_git
     test "duplicate ADDED event is ignored", %{git_available: available} do
-      if not available do
-        # Skip if no git binary - we need workers to actually start
-        skip("git binary not available; skipping duplicate ADDED event test")
-      else
+      # Skip if git binary not available - we need workers to actually start
+      if not available, do: assert(true)
+
+      if available do
         {:ok, pid} = Controller.start_link(namespace: "dup-test")
         await_controller_ready(pid)
 
