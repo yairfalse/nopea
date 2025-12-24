@@ -124,7 +124,7 @@ defmodule Nopea.DriftDetectorTest do
       assert result == :new_resource
     end
 
-    test "returns :cluster_only when in cluster but not in cache" do
+    test "returns :needs_apply when in cluster but not in cache" do
       repo_name = "test-repo-#{:rand.uniform(1000)}"
       desired = deployment_manifest("my-app", replicas: 3)
 
