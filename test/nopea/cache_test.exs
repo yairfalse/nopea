@@ -164,4 +164,51 @@ defmodule Nopea.CacheTest do
       assert manifest["spec"]["replicas"] == 3
     end
   end
+
+  describe "drift timestamps" do
+    test "records and retrieves first seen timestamp" do
+      repo_name = "test-repo-#{:rand.uniform(1000)}"
+      resource_key = "Deployment/default/api"
+
+      timestamp = Cache.record_drift_first_seen(repo_name, resource_key)
+
+      assert {:ok, ^timestamp} = Cache.get_drift_first_seen(repo_name, resource_key)
+    end
+
+    test "returns same timestamp on subsequent calls" do
+      repo_name = "test-repo-#{:rand.uniform(1000)}"
+      resource_key = "Deployment/default/api"
+
+      first = Cache.record_drift_first_seen(repo_name, resource_key)
+      Process.sleep(10)
+      second = Cache.record_drift_first_seen(repo_name, resource_key)
+
+      assert first == second
+    end
+
+    test "returns error for unknown resource" do
+      assert {:error, :not_found} = Cache.get_drift_first_seen("unknown", "unknown")
+    end
+
+    test "clears drift timestamp for resource" do
+      repo_name = "test-repo-#{:rand.uniform(1000)}"
+      resource_key = "Deployment/default/api"
+
+      Cache.record_drift_first_seen(repo_name, resource_key)
+      :ok = Cache.clear_drift_first_seen(repo_name, resource_key)
+
+      assert {:error, :not_found} = Cache.get_drift_first_seen(repo_name, resource_key)
+    end
+
+    test "clears all drift timestamps for repo" do
+      repo_name = "test-repo-#{:rand.uniform(1000)}"
+
+      Cache.record_drift_first_seen(repo_name, "Deployment/default/a")
+      Cache.record_drift_first_seen(repo_name, "Deployment/default/b")
+      :ok = Cache.clear_all_drift_timestamps(repo_name)
+
+      assert {:error, :not_found} = Cache.get_drift_first_seen(repo_name, "Deployment/default/a")
+      assert {:error, :not_found} = Cache.get_drift_first_seen(repo_name, "Deployment/default/b")
+    end
+  end
 end

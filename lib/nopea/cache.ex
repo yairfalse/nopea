@@ -18,6 +18,7 @@ defmodule Nopea.Cache do
   @resources_table :nopea_resources
   @sync_states_table :nopea_sync_states
   @last_applied_table :nopea_last_applied
+  @drift_timestamps_table :nopea_drift_timestamps
 
   # Client API
 
@@ -191,6 +192,65 @@ defmodule Nopea.Cache do
     :ok
   end
 
+  # ── Drift Timestamps (for healGracePeriod) ────────────────────────────────
+
+  @doc """
+  Records when drift was first detected for a resource.
+
+  Used for healGracePeriod - we only heal after the grace period has elapsed
+  since drift was first detected. Returns the timestamp (existing or new).
+  """
+  @spec record_drift_first_seen(String.t(), String.t()) :: DateTime.t()
+  def record_drift_first_seen(repo_name, resource_key) do
+    key = {repo_name, resource_key}
+
+    case :ets.lookup(@drift_timestamps_table, key) do
+      [{^key, timestamp}] ->
+        # Already tracking this drift
+        timestamp
+
+      [] ->
+        # First time seeing this drift
+        now = DateTime.utc_now()
+        :ets.insert(@drift_timestamps_table, {key, now})
+        now
+    end
+  end
+
+  @doc """
+  Gets when drift was first detected for a resource.
+  """
+  @spec get_drift_first_seen(String.t(), String.t()) :: {:ok, DateTime.t()} | {:error, :not_found}
+  def get_drift_first_seen(repo_name, resource_key) do
+    case :ets.lookup(@drift_timestamps_table, {repo_name, resource_key}) do
+      [{{^repo_name, ^resource_key}, timestamp}] -> {:ok, timestamp}
+      [] -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Clears drift timestamp for a resource (after healing or drift resolved).
+  """
+  @spec clear_drift_first_seen(String.t(), String.t()) :: :ok
+  def clear_drift_first_seen(repo_name, resource_key) do
+    :ets.delete(@drift_timestamps_table, {repo_name, resource_key})
+    :ok
+  end
+
+  @doc """
+  Clears all drift timestamps for a repository.
+  """
+  @spec clear_all_drift_timestamps(String.t()) :: :ok
+  def clear_all_drift_timestamps(repo_name) do
+    @drift_timestamps_table
+    |> :ets.match({{repo_name, :"$1"}, :_})
+    |> Enum.each(fn [key] ->
+      :ets.delete(@drift_timestamps_table, {repo_name, key})
+    end)
+
+    :ok
+  end
+
   # Server Callbacks
 
   @impl true
@@ -200,8 +260,9 @@ defmodule Nopea.Cache do
     :ets.new(@resources_table, [:set, :public, :named_table])
     :ets.new(@sync_states_table, [:set, :public, :named_table])
     :ets.new(@last_applied_table, [:set, :public, :named_table])
+    :ets.new(@drift_timestamps_table, [:set, :public, :named_table])
 
-    Logger.info("Cache started with ETS tables: commits, resources, sync_states, last_applied")
+    Logger.info("Cache started with ETS tables")
 
     {:ok, %{}}
   end

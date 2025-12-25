@@ -324,6 +324,8 @@ defmodule Nopea.Worker do
               {:ok, count} ->
                 # Update cache with new state
                 store_last_applied(config.name, manifests_to_apply)
+                # Clear drift timestamps for healed resources
+                clear_healed_drift_timestamps(config.name, to_heal)
                 {:ok, length(to_heal), count}
 
               {:error, _} = error ->
@@ -372,15 +374,20 @@ defmodule Nopea.Worker do
     end
   end
 
-  # Filter drifted manifests based on heal_policy and break-glass annotations
+  # Filter drifted manifests based on heal_policy, grace period, and break-glass annotations
   # Returns {to_heal, skipped} where each is [{manifest, drift_type, live}, ...]
   defp filter_for_healing(to_apply, config) do
     heal_policy = config[:heal_policy] || :auto
+    grace_period_ms = config[:heal_grace_period]
+    repo_name = config.name
 
-    Enum.split_with(to_apply, fn {_manifest, drift_type, live} ->
+    Enum.split_with(to_apply, fn {manifest, drift_type, live} ->
+      resource_key = Applier.resource_key(manifest)
+
       case drift_type do
         # Always heal git changes and new resources - git is source of truth
         :git_change ->
+          clear_drift_timestamp(repo_name, resource_key)
           true
 
         :new_resource ->
@@ -389,23 +396,28 @@ defmodule Nopea.Worker do
         :needs_apply ->
           true
 
-        # For manual drift, check policy and break-glass annotation
+        # For manual drift, check policy, grace period, and break-glass annotation
         :manual_drift ->
-          should_heal_manual_drift?(heal_policy, live)
+          should_heal_manual_drift?(heal_policy, grace_period_ms, repo_name, resource_key, live)
 
-        # Conflict: check policy and annotation
+        # Conflict: check policy, grace period, and annotation
         :conflict ->
-          should_heal_manual_drift?(heal_policy, live)
+          should_heal_manual_drift?(heal_policy, grace_period_ms, repo_name, resource_key, live)
       end
     end)
   end
 
-  # Determine if manual drift should be healed based on policy and annotation
-  defp should_heal_manual_drift?(heal_policy, live) do
+  # Determine if manual drift should be healed based on policy, grace period, and annotation
+  defp should_heal_manual_drift?(heal_policy, grace_period_ms, repo_name, resource_key, live) do
     case heal_policy do
       :auto ->
-        # Auto-heal unless break-glass annotation
-        not healing_suspended?(live)
+        # Check break-glass annotation first
+        if healing_suspended?(live) do
+          false
+        else
+          # Check grace period if configured
+          grace_period_elapsed?(grace_period_ms, repo_name, resource_key)
+        end
 
       :manual ->
         # Never auto-heal, operator must intervene
@@ -414,6 +426,48 @@ defmodule Nopea.Worker do
       :notify ->
         # Same as manual, but with webhook (future)
         false
+    end
+  end
+
+  # Check if grace period has elapsed since drift was first detected
+  defp grace_period_elapsed?(nil, _repo_name, _resource_key) do
+    # No grace period configured, heal immediately
+    true
+  end
+
+  defp grace_period_elapsed?(grace_period_ms, repo_name, resource_key) do
+    if Cache.available?() do
+      first_seen = Cache.record_drift_first_seen(repo_name, resource_key)
+      elapsed_ms = DateTime.diff(DateTime.utc_now(), first_seen, :millisecond)
+
+      if elapsed_ms >= grace_period_ms do
+        Logger.info("Grace period elapsed for #{resource_key}, healing drift")
+        true
+      else
+        remaining_s = div(grace_period_ms - elapsed_ms, 1000)
+        Logger.debug("Grace period: #{remaining_s}s remaining for #{resource_key}")
+        false
+      end
+    else
+      # No cache, heal immediately
+      true
+    end
+  end
+
+  # Clear drift timestamp after healing or when drift resolves
+  defp clear_drift_timestamp(repo_name, resource_key) do
+    if Cache.available?() do
+      Cache.clear_drift_first_seen(repo_name, resource_key)
+    end
+  end
+
+  # Clear drift timestamps for all healed resources
+  defp clear_healed_drift_timestamps(repo_name, healed) do
+    if Cache.available?() do
+      Enum.each(healed, fn {manifest, _type, _live} ->
+        resource_key = Applier.resource_key(manifest)
+        Cache.clear_drift_first_seen(repo_name, resource_key)
+      end)
     end
   end
 
