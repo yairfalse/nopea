@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Elixir](https://img.shields.io/badge/elixir-1.16%2B-purple.svg)](https://elixir-lang.org)
-[![Tests](https://img.shields.io/badge/tests-14%20files-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-171%20passing-green.svg)]()
 
 A GitOps controller for Kubernetes written in Elixir. Built to learn BEAM, OTP supervision trees, and GitOps patterns.
 
@@ -41,6 +41,8 @@ Git repo  ──poll/webhook──►  NOPEA  ──apply──►  Kubernetes
 | **ETS Cache** | No Redis, no database - pure BEAM |
 | **Rust Git Port** | libgit2 for reliable git operations |
 | **Three-Way Drift Detection** | Detects manual changes vs git changes |
+| **Configurable Healing** | auto/manual/notify policies + grace period |
+| **Break-Glass Annotation** | Per-resource opt-out for emergencies |
 | **Webhook Support** | GitHub and GitLab push events |
 | **CDEvents** | Built-in observability events |
 | **Health Endpoints** | `/health` and `/ready` probes |
@@ -120,6 +122,11 @@ spec:
   targetNamespace: default   # where to apply
   secretRef:                 # git auth (optional)
     name: git-credentials
+
+  # Healing configuration
+  suspend: false             # pause all syncing
+  healPolicy: auto           # auto | manual | notify
+  healGracePeriod: 5m        # wait before healing manual drift
 status:
   lastSyncedCommit: abc123
   lastSyncTime: "2024-01-15T10:30:00Z"
@@ -170,6 +177,52 @@ NOPEA emits CDEvents for observability:
 Configure:
 ```elixir
 config :nopea, cdevents_endpoint: "http://event-collector:8080/events"
+```
+
+---
+
+## Drift Detection & Healing
+
+NOPEA uses **three-way diff** to detect drift:
+
+| Drift Type | What Happened | Action |
+|------------|---------------|--------|
+| `git_change` | Git updated | Always apply |
+| `manual_drift` | Someone used kubectl | Heal based on policy |
+| `conflict` | Both git and cluster changed | Git wins (configurable) |
+| `no_drift` | Everything matches | Do nothing |
+
+### Healing Policies
+
+```yaml
+spec:
+  healPolicy: auto      # Default: heal manual drift immediately
+  healPolicy: manual    # Detect and emit events, but don't heal
+  healPolicy: notify    # Same as manual + webhook (planned)
+```
+
+### Grace Period
+
+Give operators time to commit their hotfix before NOPEA heals it:
+
+```yaml
+spec:
+  healGracePeriod: 5m   # Wait 5 minutes after detecting drift
+```
+
+### Break-Glass Annotation
+
+For emergencies, skip healing on specific resources:
+
+```bash
+# Joakim's 3 AM hotfix
+kubectl annotate deploy/api nopea.io/suspend-heal=true
+kubectl set image deploy/api image=hotfix-v1
+
+# NOPEA will detect drift but skip healing this resource
+
+# Later, remove annotation to resume GitOps
+kubectl annotate deploy/api nopea.io/suspend-heal-
 ```
 
 ---
