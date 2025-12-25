@@ -52,9 +52,7 @@ defmodule Nopea.Controller do
     namespace = Keyword.get(opts, :namespace, @default_namespace)
     standby = Keyword.get(opts, :standby, false)
 
-    Logger.info(
-      "Controller starting, watching namespace: #{namespace}, standby: #{standby}"
-    )
+    Logger.info("Controller starting, watching namespace: #{namespace}, standby: #{standby}")
 
     state = %__MODULE__{
       namespace: namespace,
@@ -86,6 +84,51 @@ defmodule Nopea.Controller do
     end
   end
 
+  def handle_info(:reconnect, state) do
+    Logger.info("Reconnecting watch...")
+    send(self(), :start_watch)
+    {:noreply, state}
+  end
+
+  def handle_info({:watch_event, event}, state) do
+    new_state = handle_watch_event(event, state)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:watch_error, reason}, state) do
+    Logger.warning("Watch error: #{inspect(reason)}, reconnecting...")
+    schedule_reconnect()
+    {:noreply, %{state | watch_ref: nil}}
+  end
+
+  def handle_info({:watch_done, _ref}, state) do
+    Logger.info("Watch stream ended, reconnecting...")
+    schedule_reconnect()
+    {:noreply, %{state | watch_ref: nil}}
+  end
+
+  # Leadership messages from LeaderElection
+  def handle_info({:leader, true}, state) do
+    Logger.info("Became leader, starting CRD watch")
+    send(self(), :start_watch)
+    {:noreply, %{state | standby: false}}
+  end
+
+  def handle_info({:leader, false}, state) do
+    Logger.info("Lost leadership, stopping all workers and entering standby")
+
+    # Stop all workers
+    Enum.each(state.repos, fn {name, _version} ->
+      case Supervisor.stop_worker(name) do
+        :ok -> Logger.debug("Stopped worker: #{name}")
+        {:error, reason} -> Logger.warning("Failed to stop worker #{name}: #{inspect(reason)}")
+      end
+    end)
+
+    # Clear state and enter standby
+    {:noreply, %{state | standby: true, watch_ref: nil, repos: %{}}}
+  end
+
   defp do_start_watch(state) do
     Logger.info("Starting GitRepository watch for namespace: #{state.namespace}")
 
@@ -108,58 +151,6 @@ defmodule Nopea.Controller do
         schedule_reconnect()
         {:noreply, state}
     end
-  end
-
-  @impl true
-  def handle_info(:reconnect, state) do
-    Logger.info("Reconnecting watch...")
-    send(self(), :start_watch)
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info({:watch_event, event}, state) do
-    new_state = handle_watch_event(event, state)
-    {:noreply, new_state}
-  end
-
-  @impl true
-  def handle_info({:watch_error, reason}, state) do
-    Logger.warning("Watch error: #{inspect(reason)}, reconnecting...")
-    schedule_reconnect()
-    {:noreply, %{state | watch_ref: nil}}
-  end
-
-  @impl true
-  def handle_info({:watch_done, _ref}, state) do
-    Logger.info("Watch stream ended, reconnecting...")
-    schedule_reconnect()
-    {:noreply, %{state | watch_ref: nil}}
-  end
-
-  # Leadership messages from LeaderElection
-
-  @impl true
-  def handle_info({:leader, true}, state) do
-    Logger.info("Became leader, starting CRD watch")
-    send(self(), :start_watch)
-    {:noreply, %{state | standby: false}}
-  end
-
-  @impl true
-  def handle_info({:leader, false}, state) do
-    Logger.info("Lost leadership, stopping all workers and entering standby")
-
-    # Stop all workers
-    Enum.each(state.repos, fn {name, _version} ->
-      case Supervisor.stop_worker(name) do
-        :ok -> Logger.debug("Stopped worker: #{name}")
-        {:error, reason} -> Logger.warning("Failed to stop worker #{name}: #{inspect(reason)}")
-      end
-    end)
-
-    # Clear state and enter standby
-    {:noreply, %{state | standby: true, watch_ref: nil, repos: %{}}}
   end
 
   # Private functions

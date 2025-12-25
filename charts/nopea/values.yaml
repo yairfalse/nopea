@@ -70,6 +70,11 @@ serviceAccount:
   name: nopea-controller
   annotations: {}
 
+# RBAC configuration
+rbac:
+  # Allow managing ClusterRoles/ClusterRoleBindings (security risk, disable by default)
+  manageClusterRoles: false
+
 # SSH keys for private repos (optional)
 sshKeys:
   # Name of existing secret with SSH keys

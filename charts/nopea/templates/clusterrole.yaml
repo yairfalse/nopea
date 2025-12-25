@@ -47,14 +47,20 @@ rules:
       - networkpolicies
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
-  # RBAC
+  # RBAC (namespace-scoped only by default for security)
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources:
       - roles
       - rolebindings
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- if .Values.rbac.manageClusterRoles }}
+  # Cluster-scoped RBAC (only enable if your manifests require it)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
       - clusterroles
       - clusterrolebindings
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- end }}
 
   # Events (for recording)
   - apiGroups: [""]

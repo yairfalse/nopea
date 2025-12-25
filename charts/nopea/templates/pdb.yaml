@@ -7,7 +7,8 @@ metadata:
   labels:
     {{- include "nopea.labels" . | nindent 4 }}
 spec:
-  minAvailable: 1
+  # maxUnavailable is safer than minAvailable when scaling replicas
+  maxUnavailable: 1
   selector:
     matchLabels:
       {{- include "nopea.selectorLabels" . | nindent 6 }}
