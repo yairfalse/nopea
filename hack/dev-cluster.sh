@@ -23,6 +23,7 @@ echo "==> Loading image into Kind..."
 kind load docker-image "${IMAGE_NAME}" --name "${CLUSTER_NAME}"
 
 echo "==> Installing with Helm..."
+# Note: Don't use --wait with leader election - only 1 replica will be Ready
 helm upgrade --install nopea ./charts/nopea \
     --namespace nopea-system \
     --create-namespace \
@@ -30,8 +31,7 @@ helm upgrade --install nopea ./charts/nopea \
     --set image.tag=dev \
     --set image.pullPolicy=Never \
     --set replicas=2 \
-    --set leaderElection.enabled=true \
-    --wait
+    --set leaderElection.enabled=true
 
 echo ""
 echo "==> Deployment complete!"
