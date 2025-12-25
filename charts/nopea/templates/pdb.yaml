@@ -1,0 +1,14 @@
+{{- if and .Values.leaderElection.enabled (gt (int .Values.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "nopea.fullname" . }}-controller
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "nopea.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "nopea.selectorLabels" . | nindent 6 }}
+{{- end }}

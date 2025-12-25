@@ -75,6 +75,10 @@ sshKeys:
   # Name of existing secret with SSH keys
   existingSecret: ""
 
+# Network policy
+networkPolicy:
+  enabled: false
+
 # Node selector
 nodeSelector: {}
 
