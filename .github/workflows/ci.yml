@@ -25,4 +25,4 @@ jobs:
           otp-version: '26'
 
       - name: Run Pipeline
-        run: sykli run
+        run: sykli
