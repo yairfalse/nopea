@@ -287,8 +287,21 @@ defmodule Nopea.Events do
   end
 
   # Convert error tuples/terms to JSON-serializable format
+  defp normalize_error({type, message}) when is_atom(type) and is_binary(message) do
+    %{type: Atom.to_string(type), message: message}
+  end
+
   defp normalize_error({type, message}) when is_atom(type) do
-    %{type: Atom.to_string(type), message: to_string(message)}
+    %{type: Atom.to_string(type), message: inspect(message)}
+  end
+
+  defp normalize_error(errors) when is_list(errors) do
+    errors
+    |> Enum.map(fn
+      {k, v} when is_atom(k) -> "#{k}: #{inspect(v)}"
+      other -> inspect(other)
+    end)
+    |> Enum.join(", ")
   end
 
   defp normalize_error(error) when is_binary(error), do: error

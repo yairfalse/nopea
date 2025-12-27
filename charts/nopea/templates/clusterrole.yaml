@@ -47,6 +47,12 @@ rules:
       - networkpolicies
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
+  # Autoscaling
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
   # RBAC (namespace-scoped only by default for security)
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources:
