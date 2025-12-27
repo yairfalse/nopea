@@ -12,7 +12,7 @@ defmodule Nopea.LeaderElectionTest do
 
   @moduletag :leader_election
 
-  describe "is_leader?/0" do
+  describe "leader?/0" do
     test "returns false when not started" do
       # Ensure LeaderElection is not running
       case Process.whereis(LeaderElection) do
@@ -20,7 +20,7 @@ defmodule Nopea.LeaderElectionTest do
         pid -> GenServer.stop(pid)
       end
 
-      refute LeaderElection.is_leader?()
+      refute LeaderElection.leader?()
     end
   end
 
@@ -48,7 +48,7 @@ defmodule Nopea.LeaderElectionTest do
         )
 
       # Should start in non-leader state
-      refute GenServer.call(pid, :is_leader?)
+      refute GenServer.call(pid, :leader?)
 
       GenServer.stop(pid)
     end
@@ -63,8 +63,8 @@ defmodule Nopea.LeaderElectionTest do
           k8s_module: Nopea.LeaderElection.MockK8s
         )
 
-      # Verify initial state via is_leader?
-      refute GenServer.call(pid, :is_leader?)
+      # Verify initial state via leader?
+      refute GenServer.call(pid, :leader?)
 
       GenServer.stop(pid)
     end

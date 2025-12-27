@@ -22,8 +22,7 @@ defmodule Nopea.Applier do
         # Filter out empty documents and those without required fields
         manifests =
           documents
-          |> Enum.reject(&is_nil/1)
-          |> Enum.reject(&(map_size(&1) == 0))
+          |> Enum.reject(fn doc -> is_nil(doc) or map_size(doc) == 0 end)
           |> Enum.filter(&has_required_fields?/1)
 
         {:ok, manifests}
@@ -159,32 +158,28 @@ defmodule Nopea.Applier do
       Logger.warning("No YAML files found in: #{path}")
       {:ok, []}
     else
-      results =
-        yaml_files
-        |> Enum.map(fn file ->
-          case File.read(file) do
-            {:ok, content} ->
-              case parse_manifests(content) do
-                {:ok, manifests} -> {:ok, {file, manifests}}
-                {:error, reason} -> {:error, {file, reason}}
-              end
+      collect_manifests(yaml_files)
+    end
+  end
 
-            {:error, reason} ->
-              {:error, {file, reason}}
-          end
-        end)
+  defp collect_manifests(yaml_files) do
+    results = Enum.map(yaml_files, &read_yaml_file/1)
+    errors = Enum.filter(results, &match?({:error, _}, &1))
 
-      errors = Enum.filter(results, &match?({:error, _}, &1))
+    if Enum.empty?(errors) do
+      manifests = Enum.flat_map(results, fn {:ok, {_file, manifests}} -> manifests end)
+      {:ok, manifests}
+    else
+      {:error, {:parse_failed, errors}}
+    end
+  end
 
-      if Enum.empty?(errors) do
-        manifests =
-          results
-          |> Enum.flat_map(fn {:ok, {_file, manifests}} -> manifests end)
-
-        {:ok, manifests}
-      else
-        {:error, {:parse_failed, errors}}
-      end
+  defp read_yaml_file(file) do
+    with {:ok, content} <- File.read(file),
+         {:ok, manifests} <- parse_manifests(content) do
+      {:ok, {file, manifests}}
+    else
+      {:error, reason} -> {:error, {file, reason}}
     end
   end
 

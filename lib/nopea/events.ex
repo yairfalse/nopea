@@ -296,12 +296,10 @@ defmodule Nopea.Events do
   end
 
   defp normalize_error(errors) when is_list(errors) do
-    errors
-    |> Enum.map(fn
+    Enum.map_join(errors, ", ", fn
       {k, v} when is_atom(k) -> "#{k}: #{inspect(v)}"
       other -> inspect(other)
     end)
-    |> Enum.join(", ")
   end
 
   defp normalize_error(error) when is_binary(error), do: error

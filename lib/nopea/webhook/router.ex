@@ -148,7 +148,7 @@ defmodule Nopea.Webhook.Router do
         {:error, "leader_election_not_running"}
 
       _pid ->
-        if Nopea.LeaderElection.is_leader?() do
+        if Nopea.LeaderElection.leader?() do
           {:ok, :leader}
         else
           {:ok, :not_leader}

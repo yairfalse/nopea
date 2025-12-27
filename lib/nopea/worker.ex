@@ -13,7 +13,7 @@ defmodule Nopea.Worker do
   use GenServer
   require Logger
 
-  alias Nopea.{Cache, Drift, Git, K8s, Applier, Events, Metrics}
+  alias Nopea.{Applier, Cache, Drift, Events, Git, K8s, Metrics}
   alias Nopea.Events.Emitter
 
   defstruct [
@@ -304,9 +304,7 @@ defmodule Nopea.Worker do
     config = state.config
     repo_path = repo_path(config.name)
 
-    if not File.exists?(repo_path) do
-      {:error, :repo_not_cloned}
-    else
+    if File.exists?(repo_path) do
       with {:ok, files} <- list_manifest_files(repo_path, config.path),
            {:ok, manifests} <- read_and_parse_manifests(repo_path, config.path, files) do
         # Check each manifest for drift (returns {to_apply, unchanged})
@@ -347,6 +345,8 @@ defmodule Nopea.Worker do
           end
         end
       end
+    else
+      {:error, :repo_not_cloned}
     end
   end
 
@@ -354,11 +354,7 @@ defmodule Nopea.Worker do
   # Returns {to_apply, unchanged} where to_apply is [{manifest, drift_type, live}, ...]
   # The live resource is included for break-glass annotation checking
   defp detect_drifted_manifests(repo_name, manifests) do
-    if not Cache.available?() do
-      # No cache - treat all as needing apply (new resources, no live)
-      to_apply = Enum.map(manifests, &{&1, :new_resource, nil})
-      {to_apply, []}
-    else
+    if Cache.available?() do
       {to_apply, unchanged} =
         Enum.reduce(manifests, {[], []}, fn manifest, {apply_acc, unchanged_acc} ->
           case Drift.check_manifest_drift_with_live(repo_name, manifest) do
@@ -387,6 +383,10 @@ defmodule Nopea.Worker do
         end)
 
       {Enum.reverse(to_apply), Enum.reverse(unchanged)}
+    else
+      # No cache - treat all as needing apply (new resources, no live)
+      to_apply = Enum.map(manifests, &{&1, :new_resource, nil})
+      {to_apply, []}
     end
   end
 

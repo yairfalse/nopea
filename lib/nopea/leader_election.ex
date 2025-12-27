@@ -78,11 +78,11 @@ defmodule Nopea.LeaderElection do
   @doc """
   Returns whether this instance is currently the leader.
   """
-  @spec is_leader?() :: boolean()
-  def is_leader? do
+  @spec leader?() :: boolean()
+  def leader? do
     case Process.whereis(__MODULE__) do
       nil -> false
-      pid -> GenServer.call(pid, :is_leader?)
+      pid -> GenServer.call(pid, :leader?)
     end
   end
 
@@ -126,7 +126,7 @@ defmodule Nopea.LeaderElection do
   end
 
   @impl true
-  def handle_call(:is_leader?, _from, state) do
+  def handle_call(:leader?, _from, state) do
     {:reply, state.is_leader, state}
   end
 
