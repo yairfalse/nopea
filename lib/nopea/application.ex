@@ -56,7 +56,8 @@ defmodule Nopea.Application do
       if Application.get_env(:nopea, :enable_metrics, true) do
         children ++
           [
-            {TelemetryMetricsPrometheus.Core, metrics: Nopea.Metrics.metrics(), name: :nopea_metrics}
+            {TelemetryMetricsPrometheus.Core,
+             metrics: Nopea.Metrics.metrics(), name: :nopea_metrics}
           ]
       else
         children

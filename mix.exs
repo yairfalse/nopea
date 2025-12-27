@@ -46,6 +46,7 @@ defmodule Nopea.MixProject do
       {:telemetry_metrics_prometheus_core, "~> 1.2"},
 
       # Dev/Test
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:mox, "~> 1.1", only: :test}
     ]

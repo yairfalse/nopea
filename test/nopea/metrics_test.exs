@@ -46,7 +46,9 @@ defmodule Nopea.MetricsTest do
       Process.sleep(10)
       Metrics.emit_sync_stop(start_time, %{repo: "test-repo", status: :ok})
 
-      assert_receive {[:nopea, :sync, :stop], ^ref, %{duration: duration}, %{repo: "test-repo", status: :ok}}
+      assert_receive {[:nopea, :sync, :stop], ^ref, %{duration: duration},
+                      %{repo: "test-repo", status: :ok}}
+
       assert duration > 0
     end
   end
@@ -61,7 +63,8 @@ defmodule Nopea.MetricsTest do
       start_time = System.monotonic_time()
       Metrics.emit_sync_error(start_time, %{repo: "test-repo", error: :git_failed})
 
-      assert_receive {[:nopea, :sync, :error], ^ref, %{duration: _}, %{repo: "test-repo", error: :git_failed}}
+      assert_receive {[:nopea, :sync, :error], ^ref, %{duration: _},
+                      %{repo: "test-repo", error: :git_failed}}
     end
   end
 
@@ -74,7 +77,8 @@ defmodule Nopea.MetricsTest do
 
       Metrics.emit_git_operation(:clone, 1500, %{repo: "test-repo"})
 
-      assert_receive {[:nopea, :git, :clone, :stop], ^ref, %{duration: 1500}, %{repo: "test-repo"}}
+      assert_receive {[:nopea, :git, :clone, :stop], ^ref, %{duration: 1500},
+                      %{repo: "test-repo"}}
     end
 
     test "emits telemetry event for git fetch" do
@@ -98,7 +102,8 @@ defmodule Nopea.MetricsTest do
 
       Metrics.emit_drift_detected(%{repo: "test-repo", resource: "Deployment/nginx"})
 
-      assert_receive {[:nopea, :drift, :detected], ^ref, %{count: 1}, %{repo: "test-repo", resource: "Deployment/nginx"}}
+      assert_receive {[:nopea, :drift, :detected], ^ref, %{count: 1},
+                      %{repo: "test-repo", resource: "Deployment/nginx"}}
     end
   end
 
@@ -111,7 +116,8 @@ defmodule Nopea.MetricsTest do
 
       Metrics.emit_drift_healed(%{repo: "test-repo", resource: "Deployment/nginx"})
 
-      assert_receive {[:nopea, :drift, :healed], ^ref, %{count: 1}, %{repo: "test-repo", resource: "Deployment/nginx"}}
+      assert_receive {[:nopea, :drift, :healed], ^ref, %{count: 1},
+                      %{repo: "test-repo", resource: "Deployment/nginx"}}
     end
   end
 
@@ -124,7 +130,8 @@ defmodule Nopea.MetricsTest do
 
       Metrics.emit_leader_change(%{pod: "nopea-abc123", is_leader: true})
 
-      assert_receive {[:nopea, :leader, :change], ^ref, %{status: 1}, %{pod: "nopea-abc123", is_leader: true}}
+      assert_receive {[:nopea, :leader, :change], ^ref, %{status: 1},
+                      %{pod: "nopea-abc123", is_leader: true}}
     end
 
     test "emits telemetry event for losing leadership" do
@@ -135,7 +142,8 @@ defmodule Nopea.MetricsTest do
 
       Metrics.emit_leader_change(%{pod: "nopea-abc123", is_leader: false})
 
-      assert_receive {[:nopea, :leader, :change], ^ref, %{status: 0}, %{pod: "nopea-abc123", is_leader: false}}
+      assert_receive {[:nopea, :leader, :change], ^ref, %{status: 0},
+                      %{pod: "nopea-abc123", is_leader: false}}
     end
   end
 
