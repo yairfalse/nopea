@@ -12,11 +12,11 @@ Code.eval_string("""
 use Sykli
 alias Sykli.Condition
 
-# Input patterns
-@elixir_inputs ["lib/**/*.ex", "test/**/*.exs", "config/**/*.exs", "mix.exs", "mix.lock"]
-@rust_inputs ["nopea-git/src/**/*.rs", "nopea-git/Cargo.toml", "nopea-git/Cargo.lock"]
-@helm_inputs ["charts/**/*.yaml", "charts/**/*.tpl"]
-@docker_inputs ["Dockerfile", "mix.exs", "mix.lock", "lib/**/*.ex", "config/**/*.exs", "nopea-git/**/*"]
+# Input patterns (using variables instead of module attributes for Code.eval_string context)
+elixir_inputs = ["lib/**/*.ex", "test/**/*.exs", "config/**/*.exs", "mix.exs", "mix.lock"]
+rust_inputs = ["nopea-git/src/**/*.rs", "nopea-git/Cargo.toml", "nopea-git/Cargo.lock"]
+helm_inputs = ["charts/**/*.yaml", "charts/**/*.tpl"]
+docker_inputs = ["Dockerfile", "mix.exs", "mix.lock", "lib/**/*.ex", "config/**/*.exs", "nopea-git/**/*"]
 
 pipeline do
   # ============================================================================
@@ -36,7 +36,7 @@ pipeline do
     workdir "/app"
     run "mix compile --warnings-as-errors"
     after_ ["deps"]
-    inputs @elixir_inputs
+    inputs elixir_inputs
   end
 
   task "test" do
@@ -44,14 +44,14 @@ pipeline do
     workdir "/app"
     run "mix test"
     after_ ["compile"]
-    inputs @elixir_inputs
+    inputs elixir_inputs
   end
 
   task "format" do
     container "elixir:1.16-alpine"
     workdir "/app"
     run "mix format --check-formatted"
-    inputs @elixir_inputs
+    inputs elixir_inputs
   end
 
   # ============================================================================
@@ -62,7 +62,7 @@ pipeline do
     container "rust:1.83-alpine"
     workdir "/app/nopea-git"
     run "apk add --no-cache musl-dev openssl-dev && cargo build --release"
-    inputs @rust_inputs
+    inputs rust_inputs
     output "binary", "/app/nopea-git/target/release/nopea-git"
   end
 
@@ -70,7 +70,7 @@ pipeline do
     container "rust:1.83-alpine"
     workdir "/app/nopea-git"
     run "apk add --no-cache musl-dev openssl-dev && cargo test"
-    inputs @rust_inputs
+    inputs rust_inputs
   end
 
   # ============================================================================
@@ -80,7 +80,7 @@ pipeline do
   task "docker-build" do
     run "docker build -t nopea:ci ."
     after_ ["test", "rust-build"]
-    inputs @docker_inputs
+    inputs docker_inputs
   end
 
   # ============================================================================
@@ -91,7 +91,7 @@ pipeline do
     container "alpine/helm:3.14"
     workdir "/app"
     run "helm lint charts/nopea"
-    inputs @helm_inputs
+    inputs helm_inputs
   end
 
   task "helm-template" do
@@ -99,7 +99,7 @@ pipeline do
     workdir "/app"
     run "helm template nopea charts/nopea --debug > /dev/null"
     after_ ["helm-lint"]
-    inputs @helm_inputs
+    inputs helm_inputs
   end
 
   # ============================================================================
