@@ -88,14 +88,14 @@ pipeline do
   # ============================================================================
 
   task "helm-lint" do
-    container "alpine/helm:3.14"
+    container "alpine/helm:3.16.0"
     workdir "/app"
     run "helm lint charts/nopea"
     inputs helm_inputs
   end
 
   task "helm-template" do
-    container "alpine/helm:3.14"
+    container "alpine/helm:3.16.0"
     workdir "/app"
     run "helm template nopea charts/nopea --debug > /dev/null"
     after_ ["helm-lint"]
