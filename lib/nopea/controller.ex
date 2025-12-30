@@ -159,23 +159,22 @@ defmodule Nopea.Controller do
     case K8s.list_git_repositories(state.namespace) do
       {:ok, items} ->
         Logger.info("Found #{length(items)} existing GitRepository resources")
-
-        repos =
-          Enum.reduce(items, state.repos, fn resource, acc ->
-            case start_worker_for_resource(resource) do
-              {:ok, name} ->
-                resource_version = get_in(resource, ["metadata", "resourceVersion"])
-                Map.put(acc, name, resource_version)
-
-              {:error, _reason} ->
-                acc
-            end
-          end)
-
+        repos = Enum.reduce(items, state.repos, &register_existing_resource/2)
         {:ok, %{state | repos: repos}}
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp register_existing_resource(resource, acc) do
+    case start_worker_for_resource(resource) do
+      {:ok, name} ->
+        resource_version = get_in(resource, ["metadata", "resourceVersion"])
+        Map.put(acc, name, resource_version)
+
+      {:error, _reason} ->
+        acc
     end
   end
 

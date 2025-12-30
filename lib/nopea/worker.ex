@@ -307,46 +307,52 @@ defmodule Nopea.Worker do
     if File.exists?(repo_path) do
       with {:ok, files} <- list_manifest_files(repo_path, config.path),
            {:ok, manifests} <- read_and_parse_manifests(repo_path, config.path, files) do
-        # Check each manifest for drift (returns {to_apply, unchanged})
-        # where to_apply is [{manifest, drift_type, live}, ...]
-        {to_apply, _unchanged} = detect_drifted_manifests(config.name, manifests)
-
-        Logger.debug("Drift detection for #{config.name}: #{length(to_apply)} need apply")
-
-        # Only re-apply resources that have drifted
-        if Enum.empty?(to_apply) do
-          {:ok, 0, 0}
-        else
-          # Filter out resources with break-glass annotation and heal_policy
-          {to_heal, skipped} = filter_for_healing(to_apply, config)
-
-          # Emit CDEvents for ALL detected drift (including skipped)
-          emit_drift_events(state, to_apply, skipped)
-
-          if Enum.empty?(to_heal) do
-            Logger.info("All #{length(to_apply)} drifted resources have healing suspended")
-            {:ok, length(to_apply), 0}
-          else
-            # Extract just the manifests for applying
-            manifests_to_apply = Enum.map(to_heal, fn {manifest, _type, _live} -> manifest end)
-
-            # Re-apply drifted manifests
-            case K8s.apply_manifests(manifests_to_apply, config.target_namespace) do
-              {:ok, count} ->
-                # Update cache with new state
-                store_last_applied(config.name, manifests_to_apply)
-                # Clear drift timestamps for healed resources
-                clear_healed_drift_timestamps(config.name, to_heal)
-                {:ok, length(to_heal), count}
-
-              {:error, _} = error ->
-                error
-            end
-          end
-        end
+        reconcile_manifests(state, manifests)
       end
     else
       {:error, :repo_not_cloned}
+    end
+  end
+
+  defp reconcile_manifests(state, manifests) do
+    config = state.config
+    {to_apply, _unchanged} = detect_drifted_manifests(config.name, manifests)
+
+    Logger.debug("Drift detection for #{config.name}: #{length(to_apply)} need apply")
+
+    if Enum.empty?(to_apply) do
+      {:ok, 0, 0}
+    else
+      apply_drifted_manifests(state, to_apply)
+    end
+  end
+
+  defp apply_drifted_manifests(state, to_apply) do
+    config = state.config
+    {to_heal, skipped} = filter_for_healing(to_apply, config)
+
+    # Emit CDEvents for ALL detected drift (including skipped)
+    emit_drift_events(state, to_apply, skipped)
+
+    if Enum.empty?(to_heal) do
+      Logger.info("All #{length(to_apply)} drifted resources have healing suspended")
+      {:ok, length(to_apply), 0}
+    else
+      heal_drifted_resources(config, to_heal)
+    end
+  end
+
+  defp heal_drifted_resources(config, to_heal) do
+    manifests_to_apply = Enum.map(to_heal, fn {manifest, _type, _live} -> manifest end)
+
+    case K8s.apply_manifests(manifests_to_apply, config.target_namespace) do
+      {:ok, count} ->
+        store_last_applied(config.name, manifests_to_apply)
+        clear_healed_drift_timestamps(config.name, to_heal)
+        {:ok, length(to_heal), count}
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -356,37 +362,37 @@ defmodule Nopea.Worker do
   defp detect_drifted_manifests(repo_name, manifests) do
     if Cache.available?() do
       {to_apply, unchanged} =
-        Enum.reduce(manifests, {[], []}, fn manifest, {apply_acc, unchanged_acc} ->
-          case Drift.check_manifest_drift_with_live(repo_name, manifest) do
-            {:no_drift, _live} ->
-              # Drift resolved - clear any grace period timestamp
-              resource_key = Applier.resource_key(manifest)
-              clear_drift_timestamp(repo_name, resource_key)
-              {apply_acc, [manifest | unchanged_acc]}
-
-            {:new_resource, nil} ->
-              {[{manifest, :new_resource, nil} | apply_acc], unchanged_acc}
-
-            {:needs_apply, live} ->
-              {[{manifest, :needs_apply, live} | apply_acc], unchanged_acc}
-
-            {{:git_change, _diff}, live} ->
-              {[{manifest, :git_change, live} | apply_acc], unchanged_acc}
-
-            {{:manual_drift, _diff}, live} ->
-              {[{manifest, :manual_drift, live} | apply_acc], unchanged_acc}
-
-            {{:conflict, _diff}, live} ->
-              # On conflict, git wins (desired state takes precedence)
-              {[{manifest, :conflict, live} | apply_acc], unchanged_acc}
-          end
-        end)
+        Enum.reduce(manifests, {[], []}, &classify_manifest_drift(repo_name, &1, &2))
 
       {Enum.reverse(to_apply), Enum.reverse(unchanged)}
     else
       # No cache - treat all as needing apply (new resources, no live)
       to_apply = Enum.map(manifests, &{&1, :new_resource, nil})
       {to_apply, []}
+    end
+  end
+
+  defp classify_manifest_drift(repo_name, manifest, {apply_acc, unchanged_acc}) do
+    case Drift.check_manifest_drift_with_live(repo_name, manifest) do
+      {:no_drift, _live} ->
+        resource_key = Applier.resource_key(manifest)
+        clear_drift_timestamp(repo_name, resource_key)
+        {apply_acc, [manifest | unchanged_acc]}
+
+      {:new_resource, nil} ->
+        {[{manifest, :new_resource, nil} | apply_acc], unchanged_acc}
+
+      {:needs_apply, live} ->
+        {[{manifest, :needs_apply, live} | apply_acc], unchanged_acc}
+
+      {{:git_change, _diff}, live} ->
+        {[{manifest, :git_change, live} | apply_acc], unchanged_acc}
+
+      {{:manual_drift, _diff}, live} ->
+        {[{manifest, :manual_drift, live} | apply_acc], unchanged_acc}
+
+      {{:conflict, _diff}, live} ->
+        {[{manifest, :conflict, live} | apply_acc], unchanged_acc}
     end
   end
 
@@ -398,36 +404,39 @@ defmodule Nopea.Worker do
     repo_name = config.name
 
     Enum.split_with(to_apply, fn {manifest, drift_type, live} ->
-      resource_key = Applier.resource_key(manifest)
-
-      case drift_type do
-        # New resources always apply (nothing to protect)
-        :new_resource ->
-          true
-
-        :needs_apply ->
-          true
-
-        # Git changes: apply unless break-glass annotation
-        # (Larry's hotfix should be protected even from bad git pushes)
-        :git_change ->
-          if healing_suspended?(live) do
-            Logger.warning("Git change blocked by suspend-heal annotation: #{resource_key}")
-            false
-          else
-            clear_drift_timestamp(repo_name, resource_key)
-            true
-          end
-
-        # For manual drift, check policy, grace period, and break-glass annotation
-        :manual_drift ->
-          should_heal_manual_drift?(heal_policy, grace_period_ms, repo_name, resource_key, live)
-
-        # Conflict: check policy, grace period, and annotation
-        :conflict ->
-          should_heal_manual_drift?(heal_policy, grace_period_ms, repo_name, resource_key, live)
-      end
+      should_heal_resource?(drift_type, manifest, live, heal_policy, grace_period_ms, repo_name)
     end)
+  end
+
+  defp should_heal_resource?(drift_type, manifest, live, heal_policy, grace_period_ms, repo_name) do
+    resource_key = Applier.resource_key(manifest)
+
+    case drift_type do
+      :new_resource ->
+        true
+
+      :needs_apply ->
+        true
+
+      :git_change ->
+        should_heal_git_change?(live, repo_name, resource_key)
+
+      :manual_drift ->
+        should_heal_manual_drift?(heal_policy, grace_period_ms, repo_name, resource_key, live)
+
+      :conflict ->
+        should_heal_manual_drift?(heal_policy, grace_period_ms, repo_name, resource_key, live)
+    end
+  end
+
+  defp should_heal_git_change?(live, repo_name, resource_key) do
+    if healing_suspended?(live) do
+      Logger.warning("Git change blocked by suspend-heal annotation: #{resource_key}")
+      false
+    else
+      clear_drift_timestamp(repo_name, resource_key)
+      true
+    end
   end
 
   # Determine if manual drift should be healed based on policy, grace period, and annotation
@@ -567,20 +576,17 @@ defmodule Nopea.Worker do
     repo_path = repo_path(config.name)
 
     if File.exists?(repo_path) do
-      # Do a git fetch and compare
-      case Git.sync(config.url, config.branch, repo_path) do
-        {:ok, commit_sha} ->
-          if commit_sha != state.last_commit do
-            {:changed, commit_sha}
-          else
-            :unchanged
-          end
-
-        {:error, _reason} ->
-          :unchanged
-      end
+      check_git_changes(config, repo_path, state.last_commit)
     else
       :unchanged
+    end
+  end
+
+  defp check_git_changes(config, repo_path, last_commit) do
+    case Git.sync(config.url, config.branch, repo_path) do
+      {:ok, commit_sha} when commit_sha != last_commit -> {:changed, commit_sha}
+      {:ok, _same_commit} -> :unchanged
+      {:error, _reason} -> :unchanged
     end
   end
 

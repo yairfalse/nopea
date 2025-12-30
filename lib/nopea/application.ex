@@ -48,102 +48,95 @@ defmodule Nopea.Application do
 
   @impl true
   def start(_type, _args) do
-    # ULID generator (monotonic, needed for events)
-    children = [Nopea.ULID]
-
-    # Prometheus metrics reporter
-    children =
-      if Application.get_env(:nopea, :enable_metrics, true) do
-        children ++
-          [
-            {TelemetryMetricsPrometheus.Core,
-             metrics: Nopea.Metrics.metrics(), name: :nopea_metrics}
-          ]
-      else
-        children
-      end
-
-    # CDEvents emitter (optional, enabled when endpoint is configured)
-    children =
-      case Application.get_env(:nopea, :cdevents_endpoint) do
-        nil ->
-          children
-
-        endpoint ->
-          children ++ [{Nopea.Events.Emitter, endpoint: endpoint}]
-      end
-
-    # ETS cache for commits, resources, sync state
-    children =
-      if Application.get_env(:nopea, :enable_cache, true) do
-        children ++ [Nopea.Cache]
-      else
-        children
-      end
-
-    # Registry for worker name lookup (always needed if supervisor is enabled)
-    children =
-      if Application.get_env(:nopea, :enable_supervisor, true) do
-        children ++ [{Registry, keys: :unique, name: Nopea.Registry}]
-      else
-        children
-      end
-
-    # Git GenServer (Rust Port)
-    children =
-      if Application.get_env(:nopea, :enable_git, true) do
-        children ++ [Nopea.Git]
-      else
-        children
-      end
-
-    # DynamicSupervisor for Worker processes
-    children =
-      if Application.get_env(:nopea, :enable_supervisor, true) do
-        children ++ [Nopea.Supervisor]
-      else
-        children
-      end
-
-    # Leader election (optional, for HA deployments)
     leader_election_enabled = Application.get_env(:nopea, :enable_leader_election, false)
 
     children =
-      if leader_election_enabled do
-        config = [
-          lease_name: Application.get_env(:nopea, :leader_lease_name, "nopea-leader-election"),
-          lease_namespace: System.get_env("POD_NAMESPACE", "nopea-system"),
-          holder_identity: System.get_env("POD_NAME", node_identity()),
-          lease_duration: Application.get_env(:nopea, :leader_lease_duration, 15),
-          renew_deadline: Application.get_env(:nopea, :leader_renew_deadline, 10),
-          retry_period: Application.get_env(:nopea, :leader_retry_period, 2)
-        ]
-
-        children ++ [{Nopea.LeaderElection, config}]
-      else
-        children
-      end
-
-    # Controller (watches GitRepository CRDs)
-    # Starts in standby mode when leader election is enabled
-    children =
-      if Application.get_env(:nopea, :enable_controller, true) do
-        namespace = Application.get_env(:nopea, :watch_namespace, "default")
-        children ++ [{Nopea.Controller, namespace: namespace, standby: leader_election_enabled}]
-      else
-        children
-      end
-
-    # Webhook HTTP server (for health/readiness probes and webhooks)
-    children =
-      if Application.get_env(:nopea, :enable_router, true) do
-        children ++ [Nopea.Webhook.Router]
-      else
-        children
-      end
+      [Nopea.ULID]
+      |> add_metrics_child()
+      |> add_cdevents_child()
+      |> add_cache_child()
+      |> add_registry_child()
+      |> add_git_child()
+      |> add_supervisor_child()
+      |> add_leader_election_child(leader_election_enabled)
+      |> add_controller_child(leader_election_enabled)
+      |> add_router_child()
 
     opts = [strategy: :one_for_one, name: Nopea.AppSupervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp add_metrics_child(children) do
+    if Application.get_env(:nopea, :enable_metrics, true) do
+      children ++
+        [
+          {TelemetryMetricsPrometheus.Core,
+           metrics: Nopea.Metrics.metrics(), name: :nopea_metrics}
+        ]
+    else
+      children
+    end
+  end
+
+  defp add_cdevents_child(children) do
+    case Application.get_env(:nopea, :cdevents_endpoint) do
+      nil -> children
+      endpoint -> children ++ [{Nopea.Events.Emitter, endpoint: endpoint}]
+    end
+  end
+
+  defp add_cache_child(children) do
+    if Application.get_env(:nopea, :enable_cache, true),
+      do: children ++ [Nopea.Cache],
+      else: children
+  end
+
+  defp add_registry_child(children) do
+    if Application.get_env(:nopea, :enable_supervisor, true) do
+      children ++ [{Registry, keys: :unique, name: Nopea.Registry}]
+    else
+      children
+    end
+  end
+
+  defp add_git_child(children) do
+    if Application.get_env(:nopea, :enable_git, true), do: children ++ [Nopea.Git], else: children
+  end
+
+  defp add_supervisor_child(children) do
+    if Application.get_env(:nopea, :enable_supervisor, true),
+      do: children ++ [Nopea.Supervisor],
+      else: children
+  end
+
+  defp add_leader_election_child(children, false), do: children
+
+  defp add_leader_election_child(children, true) do
+    config = [
+      lease_name: Application.get_env(:nopea, :leader_lease_name, "nopea-leader-election"),
+      lease_namespace: System.get_env("POD_NAMESPACE", "nopea-system"),
+      holder_identity: System.get_env("POD_NAME", node_identity()),
+      lease_duration: Application.get_env(:nopea, :leader_lease_duration, 15),
+      renew_deadline: Application.get_env(:nopea, :leader_renew_deadline, 10),
+      retry_period: Application.get_env(:nopea, :leader_retry_period, 2)
+    ]
+
+    children ++ [{Nopea.LeaderElection, config}]
+  end
+
+  defp add_controller_child(children, leader_election_enabled) do
+    if Application.get_env(:nopea, :enable_controller, true) do
+      namespace = Application.get_env(:nopea, :watch_namespace, "default")
+      children ++ [{Nopea.Controller, namespace: namespace, standby: leader_election_enabled}]
+    else
+      children
+    end
+  end
+
+  defp add_router_child(children) do
+    if Application.get_env(:nopea, :enable_router, true),
+      do: children ++ [Nopea.Webhook.Router],
+      else: children
   end
 
   # Generate unique node identity for leader election when POD_NAME not set

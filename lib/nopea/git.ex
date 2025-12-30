@@ -252,44 +252,38 @@ defmodule Nopea.Git do
 
   defp parse_response(data) do
     case Msgpax.unpack(data) do
-      {:ok, %{"ok" => value}} when is_binary(value) ->
-        {:ok, value}
+      {:ok, response} -> parse_git_response(response)
+      {:error, reason} -> handle_msgpack_error(reason)
+    end
+  end
 
-      {:ok, %{"ok" => files}} when is_list(files) ->
-        {:ok, files}
+  defp parse_git_response(%{"ok" => value}) when is_binary(value), do: {:ok, value}
+  defp parse_git_response(%{"ok" => files}) when is_list(files), do: {:ok, files}
 
-      {:ok,
-       %{
+  defp parse_git_response(%{
          "ok" => %{
            "sha" => sha,
            "author" => author,
            "email" => email,
-           "message" => message,
-           "timestamp" => timestamp
+           "message" => msg,
+           "timestamp" => ts
          }
-       }}
-      when is_binary(sha) and is_binary(author) and is_binary(email) and
-             is_binary(message) and is_integer(timestamp) ->
-        {:ok,
-         %{
-           sha: sha,
-           author: author,
-           email: email,
-           message: message,
-           timestamp: timestamp
-         }}
+       })
+       when is_binary(sha) and is_binary(author) and is_binary(email) and is_binary(msg) and
+              is_integer(ts) do
+    {:ok, %{sha: sha, author: author, email: email, message: msg, timestamp: ts}}
+  end
 
-      {:ok, %{"err" => reason}} ->
-        {:error, reason}
+  defp parse_git_response(%{"err" => reason}), do: {:error, reason}
 
-      {:ok, other} ->
-        Logger.error("Unexpected response from git port: #{inspect(other)}")
-        {:error, "unexpected response format"}
+  defp parse_git_response(other) do
+    Logger.error("Unexpected response from git port: #{inspect(other)}")
+    {:error, "unexpected response format"}
+  end
 
-      {:error, reason} ->
-        Logger.error("Failed to unpack msgpack response: #{inspect(reason)}")
-        {:error, {:msgpack_error, reason}}
-    end
+  defp handle_msgpack_error(reason) do
+    Logger.error("Failed to unpack msgpack response: #{inspect(reason)}")
+    {:error, {:msgpack_error, reason}}
   end
 
   @doc """
