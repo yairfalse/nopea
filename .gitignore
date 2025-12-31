@@ -27,3 +27,4 @@ Thumbs.db
 .env
 *.pem
 *.key
+priv/plts/*.plt
