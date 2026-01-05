@@ -33,10 +33,11 @@ defmodule Nopea.DistributedSupervisor do
       child_spec = %{
         id: repo_name,
         start: {Nopea.Worker, :start_link, [
-          [repo: config, name: DistributedRegistry.via(repo_name)]
+          %{name: repo_name, url: url, branch: branch, ...}
         ]}
       }
 
+  The Worker automatically uses DistributedRegistry when `cluster_enabled` is true.
   This ensures the worker can be found from any node in the cluster.
   """
 
@@ -97,8 +98,10 @@ defmodule Nopea.DistributedSupervisor do
       # By ID (searches through children)
       DistributedSupervisor.terminate_child("my-worker")
 
+  Note: This function is idempotent - it returns `:ok` even if the child
+  was already terminated or doesn't exist.
   """
-  @spec terminate_child(pid() | term()) :: :ok | {:error, :not_found}
+  @spec terminate_child(pid() | term()) :: :ok
   def terminate_child(pid) when is_pid(pid) do
     case Horde.DynamicSupervisor.terminate_child(__MODULE__, pid) do
       :ok -> :ok

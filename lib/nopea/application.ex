@@ -111,14 +111,7 @@ defmodule Nopea.Application do
 
   # Start libcluster for node discovery in cluster mode
   defp add_cluster_child(children, false), do: children
-
-  defp add_cluster_child(children, true) do
-    if Nopea.Cluster.enabled?() do
-      children ++ [Nopea.Cluster.child_spec([])]
-    else
-      children
-    end
-  end
+  defp add_cluster_child(children, true), do: children ++ [Nopea.Cluster.child_spec([])]
 
   # Start either local Registry or distributed Horde.Registry
   defp add_registry_child(children, cluster_enabled) do
