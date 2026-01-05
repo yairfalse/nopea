@@ -20,10 +20,28 @@ if config_env() == :prod do
     end
   end
 
+  # BEAM clustering configuration
+  # When enabled, uses Horde for distributed supervision with automatic failover
+  # This is mutually exclusive with leader_election - cluster mode doesn't need it
+  cluster_enabled = System.get_env("NOPEA_CLUSTER_ENABLED", "false") == "true"
+
   config :nopea,
     enable_controller: System.get_env("NOPEA_ENABLE_CONTROLLER", "true") == "true",
     watch_namespace: System.get_env("WATCH_NAMESPACE", ""),
-    # Leader election for HA deployments
+    # BEAM clustering with Horde (recommended for HA)
+    cluster_enabled: cluster_enabled,
+    cluster_strategy:
+      (case System.get_env("NOPEA_CLUSTER_STRATEGY", "kubernetes_dns") do
+         "gossip" -> :gossip
+         "epmd" -> :epmd
+         _ -> :kubernetes_dns
+       end),
+    cluster_service: System.get_env("NOPEA_CLUSTER_SERVICE", "nopea-headless"),
+    cluster_app_name: System.get_env("NOPEA_CLUSTER_APP_NAME", "nopea"),
+    pod_namespace: System.get_env("POD_NAMESPACE", "nopea-system"),
+    cluster_polling_interval: parse_integer.("NOPEA_CLUSTER_POLLING_INTERVAL", 5_000),
+    # Leader election for HA deployments (non-cluster mode only)
+    # When cluster_enabled is true, this is ignored
     enable_leader_election: System.get_env("NOPEA_ENABLE_LEADER_ELECTION", "false") == "true",
     leader_lease_name: System.get_env("NOPEA_LEADER_LEASE_NAME", "nopea-leader-election"),
     leader_lease_duration: parse_integer.("NOPEA_LEADER_LEASE_DURATION", 15),

@@ -65,18 +65,36 @@ defmodule Nopea.Worker do
 
   @doc """
   Looks up a worker by repo name.
+
+  Uses DistributedRegistry when clustering is enabled, local Registry otherwise.
   """
   @spec whereis(String.t()) :: pid() | nil
   def whereis(repo_name) do
-    case Registry.lookup(Nopea.Registry, repo_name) do
-      [{pid, _}] -> pid
-      [] -> nil
+    if cluster_enabled?() do
+      case Nopea.DistributedRegistry.lookup(repo_name) do
+        {:ok, pid} -> pid
+        {:error, :not_found} -> nil
+      end
+    else
+      case Registry.lookup(Nopea.Registry, repo_name) do
+        [{pid, _}] -> pid
+        [] -> nil
+      end
     end
   end
 
-  # Private helper for via tuple
+  # Private helper for via tuple - uses distributed registry when clustering enabled
   defp via_tuple(repo_name) do
-    {:via, Registry, {Nopea.Registry, repo_name}}
+    if cluster_enabled?() do
+      Nopea.DistributedRegistry.via(repo_name)
+    else
+      {:via, Registry, {Nopea.Registry, repo_name}}
+    end
+  end
+
+  # Check if BEAM clustering is enabled
+  defp cluster_enabled? do
+    Application.get_env(:nopea, :cluster_enabled, false)
   end
 
   # Server Callbacks
