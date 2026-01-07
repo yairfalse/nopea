@@ -20,7 +20,22 @@ watchNamespace: ""
 http:
   port: 4000
 
-# Leader election for HA deployments
+# BEAM Clustering for HA deployments (recommended)
+# Uses Horde for distributed supervision with automatic failover
+cluster:
+  enabled: false
+  # Discovery strategy: kubernetes_dns (recommended), gossip, or epmd
+  strategy: kubernetes_dns
+  # Headless service name for DNS discovery
+  service: nopea-headless
+  # Polling interval for node discovery (ms)
+  pollingInterval: 5000
+  # Distributed Erlang cookie (shared secret for node auth)
+  # Leave empty to use auto-generated cookie from release
+  cookie: ""
+
+# Leader election for HA deployments (legacy, use cluster instead)
+# Only used when cluster.enabled is false
 leaderElection:
   enabled: false
   leaseName: nopea-leader-election

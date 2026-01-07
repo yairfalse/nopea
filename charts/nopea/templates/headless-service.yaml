@@ -1,0 +1,26 @@
+{{- if .Values.cluster.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.cluster.service }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "nopea.labels" . | nindent 4 }}
+spec:
+  # Headless service - no cluster IP, DNS returns pod IPs directly
+  clusterIP: None
+  # Must match deployment selector
+  selector:
+    {{- include "nopea.selectorLabels" . | nindent 4 }}
+  ports:
+    # EPMD - Erlang Port Mapper Daemon
+    - name: epmd
+      port: 4369
+      targetPort: 4369
+      protocol: TCP
+    # Distributed Erlang
+    - name: erlang-dist
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+{{- end }}

@@ -28,6 +28,16 @@ spec:
             - name: http
               containerPort: {{ .Values.http.port }}
               protocol: TCP
+            {{- if .Values.cluster.enabled }}
+            # EPMD for node discovery
+            - name: epmd
+              containerPort: 4369
+              protocol: TCP
+            # Distributed Erlang communication
+            - name: erlang-dist
+              containerPort: 9000
+              protocol: TCP
+            {{- end }}
           env:
             - name: WATCH_NAMESPACE
               value: "{{ .Values.watchNamespace }}"
@@ -39,9 +49,38 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: NOPEA_HTTP_PORT
               value: "{{ .Values.http.port }}"
-            # Leader election
+            {{- if .Values.cluster.enabled }}
+            # BEAM Clustering
+            - name: NOPEA_CLUSTER_ENABLED
+              value: "true"
+            - name: NOPEA_CLUSTER_STRATEGY
+              value: "{{ .Values.cluster.strategy }}"
+            - name: NOPEA_CLUSTER_SERVICE
+              value: "{{ .Values.cluster.service }}"
+            - name: NOPEA_CLUSTER_APP_NAME
+              value: "nopea"
+            - name: NOPEA_CLUSTER_POLLING_INTERVAL
+              value: "{{ .Values.cluster.pollingInterval }}"
+            # Distributed Erlang configuration
+            - name: RELEASE_DISTRIBUTION
+              value: "name"
+            - name: RELEASE_NODE
+              value: "nopea@$(POD_IP)"
+            {{- if .Values.cluster.cookie }}
+            - name: RELEASE_COOKIE
+              value: "{{ .Values.cluster.cookie }}"
+            {{- end }}
+            # Erlang inet configuration for distributed mode
+            - name: ERL_AFLAGS
+              value: "-proto_dist inet_tcp -kernel inet_dist_listen_min 9000 inet_dist_listen_max 9000"
+            {{- end }}
+            # Leader election (only when clustering disabled)
             - name: NOPEA_ENABLE_LEADER_ELECTION
               value: "{{ .Values.leaderElection.enabled }}"
             {{- if .Values.leaderElection.enabled }}
