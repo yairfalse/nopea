@@ -275,26 +275,13 @@ defmodule Nopea.Controller do
   end
 
   defp start_worker_for_resource(resource) do
+    alias Nopea.GitRepository.Parser
+
     name = get_in(resource, ["metadata", "name"])
-    namespace = get_in(resource, ["metadata", "namespace"])
-    spec = Map.get(resource, "spec", %{})
 
-    config = %{
-      name: name,
-      namespace: namespace,
-      url: Map.get(spec, "url"),
-      branch: Map.get(spec, "branch", "main"),
-      path: Map.get(spec, "path"),
-      target_namespace: Map.get(spec, "targetNamespace", namespace),
-      interval: parse_interval(Map.get(spec, "interval", "5m")),
-      # Healing configuration
-      suspend: Map.get(spec, "suspend", false),
-      heal_policy: parse_heal_policy(Map.get(spec, "healPolicy", "auto")),
-      heal_grace_period: parse_interval(Map.get(spec, "healGracePeriod"))
-    }
+    try do
+      config = Parser.build_config(resource)
 
-    # Validate required fields
-    if config.url do
       case Supervisor.start_worker(config) do
         {:ok, _pid} ->
           {:ok, name}
@@ -305,9 +292,10 @@ defmodule Nopea.Controller do
         {:error, reason} ->
           {:error, reason}
       end
-    else
-      Logger.error("GitRepository #{name} missing required field: url")
-      {:error, :missing_url}
+    rescue
+      e in ArgumentError ->
+        Logger.error("Invalid GitRepository #{name}: #{e.message}")
+        {:error, :invalid_resource}
     end
   end
 
@@ -324,26 +312,6 @@ defmodule Nopea.Controller do
       true -> false
     end
   end
-
-  defp parse_interval(interval) when is_binary(interval) do
-    # Parse duration strings like "5m", "1h", "30s"
-    case Regex.run(~r/^(\d+)(s|m|h)$/, interval) do
-      [_, num, "s"] -> String.to_integer(num) * 1_000
-      [_, num, "m"] -> String.to_integer(num) * 60 * 1_000
-      [_, num, "h"] -> String.to_integer(num) * 60 * 60 * 1_000
-      # Default 5 minutes
-      _ -> 5 * 60 * 1_000
-    end
-  end
-
-  defp parse_interval(interval) when is_integer(interval), do: interval * 1_000
-  defp parse_interval(nil), do: nil
-  defp parse_interval(_), do: 5 * 60 * 1_000
-
-  defp parse_heal_policy("auto"), do: :auto
-  defp parse_heal_policy("manual"), do: :manual
-  defp parse_heal_policy("notify"), do: :notify
-  defp parse_heal_policy(_), do: :auto
 
   defp schedule_reconnect do
     Process.send_after(self(), :reconnect, @reconnect_delay)

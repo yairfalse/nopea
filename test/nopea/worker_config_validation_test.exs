@@ -30,6 +30,7 @@ defmodule Nopea.WorkerConfigValidationTest do
 
     on_exit(fn ->
       Application.delete_env(:nopea, :k8s_module)
+      Application.delete_env(:nopea, :cluster_enabled)
     end)
 
     :ok

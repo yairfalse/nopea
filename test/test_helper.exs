@@ -22,4 +22,4 @@ if wants_integration? and not rust_binary_available? do
   """)
 end
 
-ExUnit.start(exclude: [:integration])
+ExUnit.start(exclude: [:integration, :cluster])
