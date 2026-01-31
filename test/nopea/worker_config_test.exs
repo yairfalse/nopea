@@ -10,14 +10,26 @@ defmodule Nopea.WorkerConfigTest do
 
   alias Nopea.Worker
 
+  setup do
+    # Store original config value
+    original_base_path = Application.get_env(:nopea, :repo_base_path)
+
+    on_exit(fn ->
+      # Restore original config
+      if original_base_path do
+        Application.put_env(:nopea, :repo_base_path, original_base_path)
+      else
+        Application.delete_env(:nopea, :repo_base_path)
+      end
+    end)
+
+    :ok
+  end
+
   describe "repo_base_path/0" do
     test "returns configured path when set in application env" do
       custom_path = "/custom/repo/path"
       Application.put_env(:nopea, :repo_base_path, custom_path)
-
-      on_exit(fn ->
-        Application.delete_env(:nopea, :repo_base_path)
-      end)
 
       assert Worker.repo_base_path() == custom_path
     end
@@ -37,10 +49,6 @@ defmodule Nopea.WorkerConfigTest do
     test "builds path using configured base path" do
       custom_path = "/custom/repos"
       Application.put_env(:nopea, :repo_base_path, custom_path)
-
-      on_exit(fn ->
-        Application.delete_env(:nopea, :repo_base_path)
-      end)
 
       assert Worker.repo_path("my-repo") == "/custom/repos/my-repo"
     end
