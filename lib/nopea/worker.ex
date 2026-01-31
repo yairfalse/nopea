@@ -36,8 +36,6 @@ defmodule Nopea.Worker do
           status: status()
         }
 
-  @repo_base_path "/tmp/nopea/repos"
-
   # Client API
 
   @doc """
@@ -605,10 +603,31 @@ defmodule Nopea.Worker do
     :ok
   end
 
-  defp repo_path(repo_name) do
+  @doc """
+  Returns the base path for git repository storage.
+
+  Configurable via `Application.put_env(:nopea, :repo_base_path, path)`.
+  Defaults to a path under the system temp directory.
+  """
+  @spec repo_base_path() :: String.t()
+  def repo_base_path do
+    Application.get_env(:nopea, :repo_base_path, default_repo_base_path())
+  end
+
+  defp default_repo_base_path do
+    Path.join(System.tmp_dir!(), "nopea/repos")
+  end
+
+  @doc """
+  Returns the filesystem path for a repository.
+
+  Sanitizes the repo name to be filesystem-safe.
+  """
+  @spec repo_path(String.t()) :: String.t()
+  def repo_path(repo_name) do
     # Sanitize repo name for filesystem
     safe_name = String.replace(repo_name, ~r/[^a-zA-Z0-9_-]/, "_")
-    Path.join(@repo_base_path, safe_name)
+    Path.join(repo_base_path(), safe_name)
   end
 
   defp schedule_poll(state) do
