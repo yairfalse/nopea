@@ -7,6 +7,8 @@ defmodule Nopea.Git do
   without affecting other BEAM processes.
   """
 
+  @behaviour Nopea.Git.Behaviour
+
   use GenServer
   require Logger
 

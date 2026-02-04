@@ -3,6 +3,7 @@
 
 # Define Mox mocks
 Mox.defmock(Nopea.K8sMock, for: Nopea.K8s.Behaviour)
+Mox.defmock(Nopea.GitMock, for: Nopea.Git.Behaviour)
 
 rust_binary_path =
   Path.join([File.cwd!(), "nopea-git", "target", "release", "nopea-git"])

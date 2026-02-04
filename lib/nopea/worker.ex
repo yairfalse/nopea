@@ -13,8 +13,9 @@ defmodule Nopea.Worker do
   use GenServer
   require Logger
 
-  alias Nopea.{Applier, Cache, Drift, Events, Git, K8s, Metrics}
+  alias Nopea.{Applier, Cache, Drift, Events, K8s, Metrics}
   alias Nopea.Events.Emitter
+  alias Nopea.Sync.{Executor, Result}
 
   defstruct [
     :config,
@@ -252,7 +253,6 @@ defmodule Nopea.Worker do
   defp do_sync(state) do
     config = state.config
     repo_path = repo_path(config.name)
-    start_time = System.monotonic_time(:millisecond)
 
     # Emit metrics start
     metrics_start = Metrics.emit_sync_start(%{repo: config.name})
@@ -260,77 +260,72 @@ defmodule Nopea.Worker do
     Logger.info("Syncing repo: #{config.name} from #{config.url}")
     update_crd_status(state, :syncing, "Syncing from git")
 
-    with {:ok, commit_sha} <- Git.sync(config.url, config.branch, repo_path),
-         {:ok, count} <- apply_manifests_from_repo(state, repo_path) do
-      now = DateTime.utc_now()
-      duration_ms = System.monotonic_time(:millisecond) - start_time
+    case Executor.execute(config, repo_path) do
+      {:ok, %Result{} = result} ->
+        handle_sync_success(state, result, metrics_start)
 
-      new_state = %{
-        state
-        | status: :synced,
-          last_commit: commit_sha,
-          last_sync: now
-      }
-
-      # Update cache if available
-      if Cache.available?() do
-        Cache.put_sync_state(config.name, %{
-          last_sync: now,
-          last_commit: commit_sha,
-          status: :synced
-        })
-      end
-
-      # Update CRD status
-      update_crd_status(new_state, :synced, "Applied #{count} manifests")
-
-      # Emit CDEvent
-      emit_sync_event(state, new_state, count, duration_ms)
-
-      # Emit metrics success
-      Metrics.emit_sync_stop(metrics_start, %{repo: config.name, status: :ok})
-
-      Logger.info("Sync completed for #{config.name}: commit=#{commit_sha}, manifests=#{count}")
-      {:ok, new_state}
-    else
-      {:error, reason} = error ->
-        duration_ms = System.monotonic_time(:millisecond) - start_time
-        Logger.error("Sync failed for #{config.name}: #{inspect(reason)}")
-        update_crd_status(state, :failed, "Sync failed: #{inspect(reason)}")
-
-        # Emit failure CDEvent
-        emit_failure_event(state, reason, duration_ms)
-
-        # Emit metrics failure
-        Metrics.emit_sync_error(metrics_start, %{repo: config.name, error: error_type(reason)})
-
-        error
+      {:error, reason} ->
+        handle_sync_failure(state, reason, metrics_start)
     end
+  end
+
+  defp handle_sync_success(state, result, metrics_start) do
+    config = state.config
+    now = DateTime.utc_now()
+
+    new_state = %{
+      state
+      | status: :synced,
+        last_commit: result.commit,
+        last_sync: now
+    }
+
+    # Store applied resources for drift detection
+    store_last_applied(config.name, result.applied_resources)
+
+    # Update cache if available
+    if Cache.available?() do
+      Cache.put_sync_state(config.name, %{
+        last_sync: now,
+        last_commit: result.commit,
+        status: :synced
+      })
+    end
+
+    # Update CRD status
+    update_crd_status(new_state, :synced, "Applied #{result.manifest_count} manifests")
+
+    # Emit CDEvent
+    emit_sync_event(state, new_state, result.manifest_count, result.duration_ms)
+
+    # Emit metrics success
+    Metrics.emit_sync_stop(metrics_start, %{repo: config.name, status: :ok})
+
+    Logger.info(
+      "Sync completed for #{config.name}: commit=#{result.commit}, manifests=#{result.manifest_count}"
+    )
+
+    {:ok, new_state}
+  end
+
+  defp handle_sync_failure(state, reason, metrics_start) do
+    config = state.config
+
+    Logger.error("Sync failed for #{config.name}: #{inspect(reason)}")
+    update_crd_status(state, :failed, "Sync failed: #{inspect(reason)}")
+
+    # Emit failure CDEvent (estimate duration since we don't have it from Executor on failure)
+    emit_failure_event(state, reason, 0)
+
+    # Emit metrics failure
+    Metrics.emit_sync_error(metrics_start, %{repo: config.name, error: error_type(reason)})
+
+    {:error, reason}
   end
 
   defp error_type(reason) when is_atom(reason), do: reason
   defp error_type({type, _}), do: type
   defp error_type(_), do: :unknown
-
-  defp apply_manifests_from_repo(state, repo_path) do
-    config = state.config
-    manifest_path = if config.path, do: Path.join(repo_path, config.path), else: repo_path
-
-    with {:ok, files} <- list_manifest_files(repo_path, config.path),
-         {:ok, manifests} <- read_and_parse_manifests(repo_path, config.path, files) do
-      Logger.info("Found #{length(manifests)} manifests in #{manifest_path}")
-
-      case K8s.apply_manifests(manifests, config.target_namespace) do
-        {:ok, applied_resources} ->
-          # Store the actual applied resources (with K8s defaults) for accurate drift detection
-          store_last_applied(config.name, applied_resources)
-          {:ok, length(applied_resources)}
-
-        error ->
-          error
-      end
-    end
-  end
 
   # Store normalized applied resources for drift detection
   # Uses the actual K8s response (with defaults) rather than git manifests

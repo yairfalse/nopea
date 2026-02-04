@@ -11,6 +11,8 @@ defmodule Nopea.Applier do
 
   require Logger
 
+  alias Nopea.Domain.ResourceKey
+
   @doc """
   Parses YAML content into a list of manifests.
   Handles multi-document YAML (separated by ---).
@@ -35,9 +37,38 @@ defmodule Nopea.Applier do
   @doc """
   Generates a unique key for a resource.
   Format: Kind/Namespace/Name
+
+  Returns a string for backward compatibility.
+  Use `get_resource_key/1` to get a `ResourceKey` struct.
   """
   @spec resource_key(map()) :: String.t()
   def resource_key(manifest) do
+    case get_resource_key(manifest) do
+      {:ok, key} -> ResourceKey.to_string(key)
+      {:error, _} -> fallback_resource_key(manifest)
+    end
+  end
+
+  @doc """
+  Extracts a ResourceKey struct from a manifest.
+
+  Returns `{:ok, ResourceKey.t()}` on success, or `{:error, reason}` if
+  the manifest is missing required fields.
+
+  ## Examples
+
+      iex> manifest = %{"kind" => "Deployment", "metadata" => %{"name" => "api"}}
+      iex> {:ok, key} = Applier.get_resource_key(manifest)
+      iex> key.kind
+      "Deployment"
+  """
+  @spec get_resource_key(map()) :: {:ok, ResourceKey.t()} | {:error, atom()}
+  def get_resource_key(manifest) do
+    ResourceKey.from_manifest(manifest)
+  end
+
+  # Fallback for malformed manifests (backward compatibility)
+  defp fallback_resource_key(manifest) do
     kind = Map.get(manifest, "kind", "Unknown")
     metadata = Map.get(manifest, "metadata", %{})
     name = Map.get(metadata, "name", "unnamed")
@@ -48,18 +79,13 @@ defmodule Nopea.Applier do
 
   @doc """
   Computes a SHA256 hash of a manifest for drift detection.
+
+  Delegates to `Drift.compute_hash/1` which normalizes the manifest
+  before hashing (strips K8s-managed fields like resourceVersion, uid, etc.).
   """
   @spec compute_hash(map()) :: {:ok, String.t()} | {:error, term()}
   def compute_hash(manifest) do
-    case Jason.encode(manifest, pretty: false) do
-      {:ok, json} ->
-        hash = :crypto.hash(:sha256, json) |> Base.encode16(case: :lower)
-        {:ok, "sha256:#{hash}"}
-
-      {:error, reason} ->
-        Logger.error("Failed to encode manifest for hashing: #{inspect(reason)}")
-        {:error, {:encode_error, reason}}
-    end
+    Nopea.Drift.compute_hash(manifest)
   end
 
   @doc """

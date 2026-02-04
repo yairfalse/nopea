@@ -25,4 +25,10 @@ defmodule Nopea.K8s.Behaviour do
   """
   @callback get_git_repository(name :: String.t(), namespace :: String.t()) ::
               {:ok, map()} | {:error, term()}
+
+  @doc """
+  Applies a list of manifests to the cluster.
+  """
+  @callback apply_manifests(manifests :: [map()], target_namespace :: String.t() | nil) ::
+              {:ok, [map()]} | {:error, term()}
 end
